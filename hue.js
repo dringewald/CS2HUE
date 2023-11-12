@@ -7,23 +7,20 @@ const colors =
 {
     "bomb": {
         "on": true,
-        "colormode": "xy",
         "xy": [
             0.6904,
             0.3091
         ],
     },
-    "ct": {
+    "CT": {
         "on": true,
-        "colormode": "xy",
         "xy": [
 			0.1553,
 			0.1284
 		],
     },
-    "t": {
+    "T": {
         "on": true,
-        "colormode": "xy",
         "xy": [
 			0.5964,
 			0.3797
@@ -38,6 +35,10 @@ const colors =
 
 const cockpitLights = [];
 const ambientLights = [];
+
+let isBlinking = false;
+let isBombPlanted = false;
+let userTeam = '';
 
 async function getLightData(light) {
     try {
@@ -59,8 +60,7 @@ function updateLightData(light, body){
 
     request.then(async response => {
         try{
-            const body = await response.json();
-            console.log(body);
+            const request = await response.json()
         }catch(e){
             console.log(e);
         }
@@ -85,10 +85,34 @@ function bombPlanted(){
     blinkLight(42);
 }
 
-function getCSGameState(){
-    const request = fetch('http://localhost:8080');
+let gameState = {};
 
-    console.log(request);
-}
+setInterval(() => {
+    
+    let body = fs.readFileSync('gamestate.txt');
+    gameState = JSON.parse(body);
 
-getCSGameState();
+    // Bomb management
+    if(gameState.round.bomb && isBlinking === false){
+        if(gameState.round.bomb === "planted"){
+            isBlinking = true;
+            bombPlanted()
+            console.log("Bomb is planted")
+            isBombPlanted = true;
+        }
+    }
+
+    // Team management
+    if(!userTeam){
+        userTeam = gameState.player.team;
+        updateLightData(42, colors[userTeam]);
+        console.log("User is: " + userTeam);
+    }else{
+        if(userTeam != gameState.player.team){
+            userTeam = gameState.player.team
+            updateLightData(42, colors[userTeam]);
+            console.log("User is: " + userTeam);
+        }
+    }
+
+}, 100)

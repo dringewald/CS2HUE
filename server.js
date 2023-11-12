@@ -28,8 +28,12 @@ server = http.createServer((req, res) => {
         req.on('end', function () {
             // console.log("POST payload: " + body);
             // Termine la réponse avec une chaîne vide.
-            const content = JSON.parse(body);
             // console.log(content);
+            fs.writeFile('gamestate.txt', body, err => {
+                if(err){
+                    console.error("Error writing file: " + err);
+                }
+            })
             res.end( '' );
         });
     }
