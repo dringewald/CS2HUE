@@ -31,6 +31,11 @@ const colors =
         "colormode": "ct",
         "ct": 399,
     },
+    "exploded": {
+        "on": true,
+        "colormode": "ct",
+        "ct": 318
+    }
 }
 
 const cockpitLights = [];
@@ -38,6 +43,7 @@ const ambientLights = [];
 
 let isBlinking = false;
 let isBombPlanted = false;
+let isBombExploded = false;
 let userTeam = '';
 
 async function getLightData(light) {
@@ -68,7 +74,7 @@ function updateLightData(light, body){
 
 }
 
-async function blinkLight(light){
+async function blinkLight(light, interval){
     setInterval(async () => {
         const state = await getLightData(light);
         if(state.on === true){
@@ -76,43 +82,55 @@ async function blinkLight(light){
         }else{
             updateLightData(42, { on : true });
         }
-    }, 1000)
-    
+    }, interval);
 }
 
 function bombPlanted(){
+    let bombCountdown = 40;
     updateLightData(42, colors.bomb);
-    blinkLight(42);
+    blinkLight(42, 1000);
+}
+
+function bombExploded(){
+    updateLightData(42, colors.exploded);
 }
 
 let gameState = {};
 
-setInterval(() => {
+// setInterval(() => {
     
-    let body = fs.readFileSync('gamestate.txt');
-    gameState = JSON.parse(body);
+//     let body = fs.readFileSync('gamestate.txt');
+//     gameState = JSON.parse(body);
 
-    // Bomb management
-    if(gameState.round.bomb && isBlinking === false){
-        if(gameState.round.bomb === "planted"){
-            isBlinking = true;
-            bombPlanted()
-            console.log("Bomb is planted")
-            isBombPlanted = true;
-        }
-    }
+//     // Bomb management
+//     if(gameState.round.bomb){
+//         if(isBlinking === false){
+//             if(gameState.round.bomb === "planted"){
+//                 isBombPlanted = true;
+//                 bombPlanted();
+//                 isBlinking = true;
+//                 console.log("Bomb is planted");
+//             }
+//         }
+//         if(gameState.round.bomb === "exploded" && isBombExploded === false){
+//             isBombExploded = true;
+//             isBombPlanted = false;
+//             isBlinking = false;
+//             console.log("BOOM");
+//         }
+//     }
 
-    // Team management
-    if(!userTeam){
-        userTeam = gameState.player.team;
-        updateLightData(42, colors[userTeam]);
-        console.log("User is: " + userTeam);
-    }else{
-        if(userTeam != gameState.player.team){
-            userTeam = gameState.player.team
-            updateLightData(42, colors[userTeam]);
-            console.log("User is: " + userTeam);
-        }
-    }
+//     // Team management
+//     if(!userTeam){
+//         userTeam = gameState.player.team;
+//         updateLightData(42, colors[userTeam]);
+//         console.log("User is: " + userTeam);
+//     }else{
+//         if(userTeam != gameState.player.team){
+//             userTeam = gameState.player.team
+//             updateLightData(42, colors[userTeam]);
+//             console.log("User is: " + userTeam);
+//         }
+//     }
 
-}, 100)
+// }, 100)
