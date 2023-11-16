@@ -14,6 +14,7 @@ const colors =
     },
     "CT": {
         "on": true,
+        "bri": 20,
         "xy": [
 			0.1553,
 			0.1284
@@ -21,6 +22,7 @@ const colors =
     },
     "T": {
         "on": true,
+        "bri": 20,
         "xy": [
 			0.5964,
 			0.3797
@@ -35,7 +37,15 @@ const colors =
         "on": true,
         "colormode": "ct",
         "ct": 318
-    }
+    },
+    "defused": {
+        "on": true,
+        "bri": 100,
+        "xy": [
+			0.1553,
+			0.1284
+		],
+    },
 }
 
 const cockpitLights = [];
@@ -45,6 +55,7 @@ let gameState = {};
 let isBombPlanted = false;
 let isBombExploded = false;
 let userTeam = '';
+let blinkEffect;
 
 async function getLightData(light) {
     try {
@@ -88,7 +99,7 @@ function blinkLight(light, interval){
 function bombPlanted(){
     let bombCountdown = 40;
     updateLightData(42, colors.bomb);
-    let blinkEffect = blinkLight(42, 1000);
+    blinkEffect = blinkLight(42, 1000);
     let timer = setInterval(() => {
         bombCountdown--
         if(bombCountdown === 30){
@@ -120,6 +131,11 @@ function bombExploded(){
     console.log("BOOM");
 }
 
+function bombDefused(){
+    updateLightData(42, colors.defused);
+    console.log("Bomb has been defused.");
+}
+
 function setUserTeamColor(){
     if(!userTeam){
         userTeam = gameState.player.team;
@@ -138,22 +154,33 @@ setInterval(() => {
     let body = fs.readFileSync('gamestate.txt');
     gameState = JSON.parse(body);
 
-    // Bomb management
-    if(gameState.round.bomb){
-        if(isBombPlanted === false){
-            if(gameState.round.bomb === "planted"){
-                isBombPlanted = true;
-                bombPlanted();
-                console.log("Bomb is planted");
+    // Verify if game is ongoing
+    if(gameState.round){
+
+        // Bomb management
+        if(gameState.round.bomb){
+            if(isBombPlanted === false){
+                if(gameState.round.bomb === "planted"){
+                    isBombPlanted = true;
+                    const bombCoucou = bombPlanted();
+                    console.log("Bomb is planted");
+                }
             }
+            if(gameState.round.bomb === "exploded" && isBombExploded === false){
+                isBombExploded = true;
+                isBombPlanted = false;
+                clearInterval(blinkEffect);
+                bombExploded();
+            }
+            if(gameState.round.bomb === "defused"){
+                isBombPlanted = false;
+                bombDefused();
+                clearInterval(blinkEffect);
+            }
+        }else{
+            setUserTeamColor();  
         }
-        if(gameState.round.bomb === "exploded" && isBombExploded === false){
-            isBombExploded = true;
-            isBombPlanted = false;
-            bombExploded();
-        }
-    }else{
-        setUserTeamColor();  
     }
 
-}, 100)
+
+}, 200)
