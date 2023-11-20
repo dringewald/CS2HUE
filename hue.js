@@ -45,6 +45,7 @@ const colors =
 			0.1553,
 			0.1284
 		],
+        "transitionTime" : 0,
     },
 }
 
@@ -54,9 +55,11 @@ const ambientLights = [];
 let gameState = {};
 let isBombPlanted = false;
 let isBombExploded = false;
+let isBombDefused = false;
 let userTeam = '';
 let blinkEffect;
-let bombTimer;
+let bombCountdown;
+let timer;
 
 async function getLightData(light) {
     try {
@@ -79,6 +82,7 @@ function updateLightData(light, body){
     request.then(async response => {
         try{
             const request = await response.json()
+            return request;
         }catch(e){
             console.log(e);
         }
@@ -86,40 +90,60 @@ function updateLightData(light, body){
 
 }
 
-function blinkLight(light, interval){
-    return setInterval(async () => {
+function changeBrightness(light, value){
+    getLightData(light).then(previousState => {
+        if(previousState.on === false){
+            updateLightData(light, {"on": true, "bri": value});
+            updateLightData(light, {"on": false});
+        }else{
+            updateLightData(light, {"bri": value});
+        }
+    });
+};
+
+function blinkLight(light, speed, repetition){
+    let repeater = 0;
+    const interval = setInterval(async () => {
         const state = await getLightData(light);
         if(state.on === true){
             updateLightData(42, { on : false });
         }else{
             updateLightData(42, { on : true });
+            repeater++;
+            if(repeater === repetition){
+                clearInterval(interval);
+            }
         }
-    }, interval);
+    }, speed);
+    return interval;
 }
 
 function bombPlanted(){
-    bombTimer = 40;
+    bombCountdown = 40;
     updateLightData(42, colors.bomb);
     blinkEffect = blinkLight(42, 1000);
-    let timer = setInterval(() => {
-        bombTimer--
-        if(bombTimer === 30){
+    timer = setInterval(() => {
+        bombCountdown--
+        if(bombCountdown === 30){
             clearInterval(blinkEffect);
             blinkEffect = blinkLight(42, 750);
         }
-        if(bombTimer === 20){
+        if(bombCountdown === 20){
             clearInterval(blinkEffect);
             blinkEffect = blinkLight(42, 500);
         }
-        if(bombTimer === 10){
+        if(bombCountdown === 12){
+            changeBrightness(42, 50);
             clearInterval(blinkEffect);
             blinkEffect = blinkLight(42, 250);
         }
-        if(bombTimer === 5){
+        if(bombCountdown === 5){
+            console.log("Timer at 5");
+            changeBrightness(42, 100);
             clearInterval(blinkEffect);
             blinkEffect = blinkLight(42, 100);
         }
-        if(bombTimer === 2){
+        if(bombCountdown === 2){
             clearInterval(blinkEffect);
             clearInterval(timer);
         }
@@ -128,16 +152,17 @@ function bombPlanted(){
 
 function bombExploded(){
     clearInterval(blinkEffect);
-    bombTimer = null;
+    bombCountdown = null;
     updateLightData(42, colors.exploded);
     console.log("BOOM");
 }
 
 function bombDefused(){
     clearInterval(blinkEffect);
-    bombTimer = null;
+    bombCountdown = null;
     updateLightData(42, colors.defused);
-    console.log("Bomb has been defused.");
+    console.log("Bomb has been defused");
+    blinkLight(42, 100, 3);
 }
 
 function setUserTeamColor(){
@@ -166,8 +191,8 @@ setInterval(() => {
             if(isBombPlanted === false){
                 if(gameState.round.bomb === "planted"){
                     isBombPlanted = true;
-                    const bombCoucou = bombPlanted();
-                    console.log("Bomb is planted");
+                    bombPlanted();
+                    console.log("Bomb has been planted");
                 }
             }
             if(gameState.round.bomb === "exploded" && isBombExploded === false){
@@ -175,9 +200,12 @@ setInterval(() => {
                 isBombPlanted = false;
                 bombExploded();
             }
-            if(gameState.round.bomb === "defused"){
-                isBombPlanted = false;
-                bombDefused();
+            if(isBombDefused === false){
+                if(gameState.round.bomb === "defused"){
+                   isBombPlanted = false;
+                   isBombDefused = true;
+                   bombDefused();
+               }
             }
         }else{
             setUserTeamColor();  
