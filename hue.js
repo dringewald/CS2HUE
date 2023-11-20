@@ -123,20 +123,19 @@ function bombPlanted(){
             clearInterval(blinkEffect);
             clearInterval(timer);
         }
-        // console.log(bombTimer);
     }, 1000)
 }
 
 function bombExploded(){
     clearInterval(blinkEffect);
-    clearInterval(bombTimer);
+    bombTimer = null;
     updateLightData(42, colors.exploded);
     console.log("BOOM");
 }
 
 function bombDefused(){
     clearInterval(blinkEffect);
-    clearInterval(bombTimer);
+    bombTimer = null;
     updateLightData(42, colors.defused);
     console.log("Bomb has been defused.");
 }
