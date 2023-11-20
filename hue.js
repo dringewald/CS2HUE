@@ -56,6 +56,7 @@ let isBombPlanted = false;
 let isBombExploded = false;
 let userTeam = '';
 let blinkEffect;
+let bombTimer;
 
 async function getLightData(light) {
     try {
@@ -97,41 +98,45 @@ function blinkLight(light, interval){
 }
 
 function bombPlanted(){
-    let bombCountdown = 40;
+    bombTimer = 40;
     updateLightData(42, colors.bomb);
     blinkEffect = blinkLight(42, 1000);
     let timer = setInterval(() => {
-        bombCountdown--
-        if(bombCountdown === 30){
+        bombTimer--
+        if(bombTimer === 30){
             clearInterval(blinkEffect);
             blinkEffect = blinkLight(42, 750);
         }
-        if(bombCountdown === 20){
+        if(bombTimer === 20){
             clearInterval(blinkEffect);
             blinkEffect = blinkLight(42, 500);
         }
-        if(bombCountdown === 10){
+        if(bombTimer === 10){
             clearInterval(blinkEffect);
             blinkEffect = blinkLight(42, 250);
         }
-        if(bombCountdown === 5){
+        if(bombTimer === 5){
             clearInterval(blinkEffect);
             blinkEffect = blinkLight(42, 100);
         }
-        if(bombCountdown === 2){
+        if(bombTimer === 2){
             clearInterval(blinkEffect);
             clearInterval(timer);
         }
-        // console.log(bombCountdown);
+        // console.log(bombTimer);
     }, 1000)
 }
 
 function bombExploded(){
+    clearInterval(blinkEffect);
+    clearInterval(bombTimer);
     updateLightData(42, colors.exploded);
     console.log("BOOM");
 }
 
 function bombDefused(){
+    clearInterval(blinkEffect);
+    clearInterval(bombTimer);
     updateLightData(42, colors.defused);
     console.log("Bomb has been defused.");
 }
@@ -169,13 +174,11 @@ setInterval(() => {
             if(gameState.round.bomb === "exploded" && isBombExploded === false){
                 isBombExploded = true;
                 isBombPlanted = false;
-                clearInterval(blinkEffect);
                 bombExploded();
             }
             if(gameState.round.bomb === "defused"){
                 isBombPlanted = false;
                 bombDefused();
-                clearInterval(blinkEffect);
             }
         }else{
             setUserTeamColor();  
