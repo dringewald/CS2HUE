@@ -64,7 +64,7 @@ To get your the IP of your Bridge, click on [this link](https://discovery.meethu
 
 To make this script work, you need to define which light you want to animate.
 
-- Open the Debug tool though on `http://YOUR_BRIDGE_API/debug/clip.html`
+- Open the Debug tool on `http://YOUR_BRIDGE_API/debug/clip.html`
 - Fill the URL field with `/api/YOUR_API_KEY/lights` (replace informations)
 - Press `GET` button
 - In the response area, you’ll get a list of all the lights of your bridge. Press `CTRL+F` and search for the name of the light you want to control
