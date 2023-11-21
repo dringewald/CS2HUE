@@ -28,7 +28,7 @@ C:\Program Files\Steam\steamapps\common\Counter-Strike Global Offensive\csgo\cfg
 
 3. Install [Node.js](https://nodejs.org/en)
 
-4. Open config.json and edit the required informations. Here is a tutorial on how to find everything.
+4. Open config.json and edit the required informations. Check tutorial below on how to find everything.
 
 ```jsx
 {
