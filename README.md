@@ -41,7 +41,7 @@ C:\Program Files\Steam\steamapps\common\Counter-Strike Global Offensive\csgo\cfg
 
 ## Usage
 
-1. Open terminal and run `node server.js`
+1. Open terminal from the script folder and run `node server.js`
 2. Open another terminal and run `node hue.js`
    
 
