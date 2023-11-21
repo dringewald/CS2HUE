@@ -1,60 +1,58 @@
-// Importe le module HTTP (pour créer le serveur) et le module fs (pour travailler avec le système de fichiers).
-http = require('http');
-fs = require('fs');
+// Import the HTTP module (to create the server) and fs module (to work with the file system).
+const http = require('http');
+const fs = require('fs');
 
-// Définit le port et l'hôte sur lesquels le serveur écoutera.
-port = 8080;
-host = '127.0.0.1';
+// Define the port and host on which the server will listen.
+const port = 8080;
+const host = '127.0.0.1';
 
-// Crée un serveur HTTP qui répond à toutes les requêtes avec une fonction de rappel.
-server = http.createServer((req, res) => {
+// Create an HTTP server that responds to all requests with a callback function.
+const server = http.createServer((req, res) => {
 
-    // Vérifie si la requête est une requête POST.
+    // Check if the request is a POST request.
     if (req.method == 'POST') {
         console.log("Handling POST request...");
 
-        // Configure l'en-tête de la réponse avec le code de statut 200 et le type de contenu text/html.
+        // Configure the response header with the status code 200 and the content type text/html.
         res.writeHead(200, {'Content-Type': 'text/html'});
 
-        // Initialise une chaîne pour stocker les données de la requête POST.
+        // Initialize a string to store the data from the POST request.
         let body = '';
 
-        // Écoute l'événement 'data' pour collecter les données de la requête.
+        // Listen for the 'data' event to collect the request data.
         req.on('data', function (data) {
             body = data;
         });
 
-        // Écoute l'événement 'end', qui est déclenché lorsque toutes les données ont été reçues.
+        // Listen for the 'end' event, which is triggered when all data has been received.
         req.on('end', function () {
-            // console.log("POST payload: " + body);
-            // Termine la réponse avec une chaîne vide.
-            // console.log(content);
             fs.writeFile('gamestate.txt', body, err => {
                 if(err){
                     console.error("Error writing file: " + err);
                 }
             })
+            // Finish the response with an empty string.
             res.end( '' );
         });
     }
-    // Si la requête n'est pas une requête POST.
+    // If the request is not a POST request.
     else {
         console.log("Request received is not POST.");
 
-        // Configure l'en-tête de la réponse avec le code de statut 200 et le type de contenu text/html.
+        // Configure the response header with the status code 200 and the content type text/html.
         res.writeHead(200, {'Content-Type': 'text/html'});
 
-        // Crée une page HTML de réponse indiquant l'adresse et le port du serveur.
-        var html = '<html><body>HTTP Server at http://' + host + ':' + port + '</body></html>';
+        // Create an HTML response page indicating the server's address and port.
+        const html = '<html><body>HTTP Server at http://' + host + ':' + port + '</body></html>';
 
-        // Termine la réponse avec la page HTML créée.
+        // Finish the response with the created HTML page.
         res.end(html);
     }
 
 });
 
-// Fait écouter le serveur sur le port et l'hôte spécifiés.
+// Make the server listen on the specified port and host.
 server.listen(port, host);
 
-// Affiche un message dans la console indiquant que le serveur écoute.
+// Display a message in the console indicating that the server is listening.
 console.log('Listening at http://' + host + ':' + port);

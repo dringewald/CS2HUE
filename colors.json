@@ -1,31 +1,33 @@
 {
     "bomb": {
-        "on": true,
-        "colormode": "xy",
-        "xy": [
-            0.6904,
-            0.3091
-        ],
+      "on": true,
+      "xy": [0.6904, 0.3091]
     },
     "CT": {
-        "on": true,
-        "colormode": "xy",
-        "xy": [
-			0.1553,
-			0.1284
-		],
+      "on": true,
+      "bri": 20,
+      "xy": [0.1553, 0.1284]
     },
     "T": {
-        "on": true,
-        "colormode": "xy",
-        "xy": [
-			0.5964,
-			0.3797
-		],
+      "on": true,
+      "bri": 20,
+      "xy": [0.5964, 0.3797]
     },
-    "Default": {
-        "on": true,
-        "colormode": "ct",
-        "ct": 399,
+    "default": {
+      "on": true,
+      "colormode": "ct",
+      "ct": 399
     },
-}
+    "exploded": {
+      "on": true,
+      "colormode": "ct",
+      "ct": 318
+    },
+    "defused": {
+      "on": true,
+      "bri": 100,
+      "xy": [0.1553, 0.1284],
+      "transitionTime": 0
+    }
+  }
+  

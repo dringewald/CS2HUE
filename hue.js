@@ -1,56 +1,11 @@
 const http = require('http');
 const fs = require('fs');
+const config = require('./config.json');
+const colors = require('./colors.json');
 
-const hueAPI = "http://192.168.1.194/api/WWNKlzc7RrWWvU8NXuUBkJCi6zt2SPsLi32Zo9EH"
+const hueAPI = `http://${config.BRIDGE_IP}/api/${config.API_KEY}`
 
-const colors =
-{
-    "bomb": {
-        "on": true,
-        "xy": [
-            0.6904,
-            0.3091
-        ],
-    },
-    "CT": {
-        "on": true,
-        "bri": 20,
-        "xy": [
-			0.1553,
-			0.1284
-		],
-    },
-    "T": {
-        "on": true,
-        "bri": 20,
-        "xy": [
-			0.5964,
-			0.3797
-		],
-    },
-    "default": {
-        "on": true,
-        "colormode": "ct",
-        "ct": 399,
-    },
-    "exploded": {
-        "on": true,
-        "colormode": "ct",
-        "ct": 318
-    },
-    "defused": {
-        "on": true,
-        "bri": 100,
-        "xy": [
-			0.1553,
-			0.1284
-		],
-        "transitionTime" : 0,
-    },
-}
-
-const cockpitLights = [];
-const ambientLights = [];
+const currentLight = config.LIGHT_ID;
 
 let gameState = {};
 let isBombPlanted = false;
@@ -214,3 +169,5 @@ setInterval(() => {
 
 
 }, 200)
+
+updateLightData(42, colors.bomb);
