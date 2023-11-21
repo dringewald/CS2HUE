@@ -22,7 +22,7 @@ async function getLightData(light) {
         const body = await response.json();
         const state = body.state;
         return state;
-    } catch (error) {
+    } catch(error) {
         console.error(error);
     }
 }
@@ -61,9 +61,9 @@ function blinkLight(light, speed, repetition){
     const interval = setInterval(async () => {
         const state = await getLightData(light);
         if(state.on === true){
-            updateLightData(42, { on : false });
+            updateLightData(currentLight, { on : false });
         }else{
-            updateLightData(42, { on : true });
+            updateLightData(currentLight, { on : true });
             repeater++;
             if(repeater === repetition){
                 clearInterval(interval);
@@ -75,28 +75,28 @@ function blinkLight(light, speed, repetition){
 
 function bombPlanted(){
     bombCountdown = 40;
-    updateLightData(42, colors.bomb);
-    blinkEffect = blinkLight(42, 1000);
+    updateLightData(currentLight, colors.bomb);
+    blinkEffect = blinkLight(currentLight, 1000);
     timer = setInterval(() => {
         bombCountdown--
         if(bombCountdown === 30){
             clearInterval(blinkEffect);
-            blinkEffect = blinkLight(42, 750);
+            blinkEffect = blinkLight(currentLight, 750);
         }
         if(bombCountdown === 20){
             clearInterval(blinkEffect);
-            blinkEffect = blinkLight(42, 500);
+            blinkEffect = blinkLight(currentLight, 500);
         }
         if(bombCountdown === 12){
-            changeBrightness(42, 50);
+            changeBrightness(currentLight, 50);
             clearInterval(blinkEffect);
-            blinkEffect = blinkLight(42, 250);
+            blinkEffect = blinkLight(currentLight, 250);
         }
         if(bombCountdown === 5){
             console.log("Timer at 5");
-            changeBrightness(42, 100);
+            changeBrightness(currentLight, 100);
             clearInterval(blinkEffect);
-            blinkEffect = blinkLight(42, 100);
+            blinkEffect = blinkLight(currentLight, 100);
         }
         if(bombCountdown === 2){
             clearInterval(blinkEffect);
@@ -108,16 +108,16 @@ function bombPlanted(){
 function bombExploded(){
     clearInterval(blinkEffect);
     bombCountdown = null;
-    updateLightData(42, colors.exploded);
+    updateLightData(currentLight, colors.exploded);
     console.log("BOOM");
 }
 
 function bombDefused(){
     clearInterval(blinkEffect);
     bombCountdown = null;
-    updateLightData(42, colors.defused);
+    updateLightData(currentLight, colors.defused);
     console.log("Bomb has been defused");
-    blinkLight(42, 100, 3);
+    blinkLight(currentLight, 100, 3);
 }
 
 function setUserTeamColor(){
@@ -130,8 +130,10 @@ function setUserTeamColor(){
             console.log("User is: " + userTeam);
         }
     }
-    updateLightData(42, colors[userTeam]);
+    updateLightData(currentLight, colors[userTeam]);
 }
+
+startScript();
 
 setInterval(() => {
     
@@ -169,5 +171,3 @@ setInterval(() => {
 
 
 }, 200)
-
-updateLightData(42, colors.bomb);
