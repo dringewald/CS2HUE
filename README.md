@@ -20,15 +20,15 @@ CS2HUE enables Counter-Strike players to synchronize Philips Hue lights with the
 git clone https://github.com/floranknz/CS2HUE.git
 ```
 
-1. Copy the `gamestate_integration_cs2hue.cfg` file to your CS2 config directory :
+2. Copy the `gamestate_integration_cs2hue.cfg` file to your CS2 config directory :
 
 ```text
 C:\Program Files\Steam\steamapps\common\Counter-Strike Global Offensive\csgo\cfg
 ```
 
-1. Install [Node.js](https://nodejs.org/en)
+3. Install [Node.js](https://nodejs.org/en)
 
-1. Open config.json and edit the required informations. Here is a tutorial on how to find everything.
+4. Open config.json and edit the required informations. Check tutorial below on how to find everything.
 
 ```jsx
 {
@@ -41,7 +41,7 @@ C:\Program Files\Steam\steamapps\common\Counter-Strike Global Offensive\csgo\cfg
 
 ## Usage
 
-1. Open terminal and run `node server.js`
+1. Open terminal from the script folder and run `node server.js`
 2. Open another terminal and run `node hue.js`
    
 
@@ -64,7 +64,7 @@ To get your the IP of your Bridge, click on [this link](https://discovery.meethu
 
 To make this script work, you need to define which light you want to animate.
 
-- Open the Debug tool though on `http://YOUR_BRIDGE_API/debug/clip.html`
+- Open the Debug tool on `http://YOUR_BRIDGE_API/debug/clip.html`
 - Fill the URL field with `/api/YOUR_API_KEY/lights` (replace informations)
 - Press `GET` button
 - In the response area, you’ll get a list of all the lights of your bridge. Press `CTRL+F` and search for the name of the light you want to control
