@@ -16,6 +16,33 @@ let blinkEffect;
 let bombCountdown;
 let timer;
 
+function startScript(){
+    console.log("Connecting...");
+    fetch(`${hueAPI}/lights/${currentLight}`)
+    .then(async response => {
+        console.log("Connected to Hue bridge.");
+        const data = await response.json();
+        if(data.state){
+            console.log("Ready!");
+        }else if(data[0]){
+            const error = data[0].error
+            if(error.type === 1){
+                throw new Error("Error: API key is rejected by the server. Verify the one you provided.");
+            }
+            if(error.type === 3){
+                throw new Error("Error: Can't find your light. Verify the ID you provided.");
+            }
+        }
+    })
+    .catch((error) => {
+        if(error.message === "fetch failed"){
+            console.log("Error: Can't connect to your Hue bridge. Verify IP address.");
+        }else{
+            console.log(error.message);
+        }
+    });
+}
+
 async function getLightData(light) {
     try {
         const response = await fetch(`${hueAPI}/lights/${light}`);
