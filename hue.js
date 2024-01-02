@@ -164,8 +164,12 @@ startScript();
 
 setInterval(() => {
     
-    let body = fs.readFileSync('gamestate.txt');
-    gameState = JSON.parse(body);
+    try{
+        let body = fs.readFileSync('gamestate.txt');
+        gameState = JSON.parse(body);
+    }catch{
+        console.log("Error while fetching game state.")
+    }
 
     // Verify if game is ongoing
     if(gameState.round){
@@ -192,7 +196,9 @@ setInterval(() => {
                }
             }
         }else{
-            setUserTeamColor();  
+            if(gameState.player && gameState.player.team){
+                setUserTeamColor();
+            }  
         }
     }
 
