@@ -8,7 +8,7 @@ CS2HUE enables Counter-Strike players to synchronize Philips Hue lights with the
 - **Bomb lightning** : your light start to blink as soon as the bomb is planted, increasing in speed until the bomb explode, or is defused.
 
 <aside>
-ℹ️ This beta version might face some light bugs that will have no incidence on your game. Feel free to share your issues on this reddit thread in order to help me fix them. This script is constantly improved!
+ℹ️ This beta version might face some light bugs that will have no incidence on your game. Feel free to share your issues in order to help me fix them. This script is constantly improved!
 
 </aside>
 
