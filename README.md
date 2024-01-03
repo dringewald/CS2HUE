@@ -14,11 +14,7 @@ CS2HUE enables Counter-Strike players to synchronize Philips Hue lights with the
 
 ## Installation
 
-1. Download the latest release from the [Releases]([https://nodejs.org/en](https://github.com/floranknz/CS2HUE/releases)) page.
-
-```bash
-git clone https://github.com/floranknz/CS2HUE.git
-```
+1. Download the latest release from the [Releases](https://nodejs.org/en](https://github.com/floranknz/CS2HUE/releases) page.
 
 2. Copy the `gamestate_integration_cs2hue.cfg` file to your CS2 config directory :
 
