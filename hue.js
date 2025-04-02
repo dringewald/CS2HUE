@@ -5,20 +5,25 @@ const colors = require('./colors.json');
 
 const hueAPI = `http://${config.BRIDGE_IP}/api/${config.API_KEY}`
 
-const currentLight = config.LIGHT_ID;
+const lightIDs = config.LIGHT_ID.split(',').map(id => id.trim());
+let isTimerEnabled = config.SHOW_BOMB_TIMER;
 
 let gameState = {};
 let isBombPlanted = false;
 let isBombExploded = false;
 let isBombDefused = false;
 let userTeam = '';
-let blinkEffect;
+let blinkEffect = [];
 let bombCountdown;
 let timer;
 
+function forEachLight(callback) {
+    lightIDs.forEach(light => callback(light));
+}
+
 function startScript(){
     console.log("Connecting...");
-    fetch(`${hueAPI}/lights/${currentLight}`)
+    fetch(`${hueAPI}/lights/${lightIDs[0]}`)
     .then(async response => {
         console.log("Connected to Hue bridge.");
         const data = await response.json();
@@ -47,29 +52,26 @@ async function getLightData(light) {
     try {
         const response = await fetch(`${hueAPI}/lights/${light}`);
         const body = await response.json();
-        const state = body.state;
-        return state;
+        return body.state;
     } catch(error) {
         console.error(error);
     }
 }
 
 function updateLightData(light, body){
-    const request = fetch(`${hueAPI}/lights/${light}/state`, {
+    fetch(`${hueAPI}/lights/${light}/state`, {
         method: "PUT",
         body: JSON.stringify(body),
         headers: { "Content-Type": "application/json" }
     })
-
-    request.then(async response => {
+    .then(async response => {
         try{
-            const request = await response.json()
-            return request;
+            const result = await response.json();
+            return result;
         }catch(e){
             console.log(e);
         }
-    })
-
+    });
 }
 
 function changeBrightness(light, value){
@@ -81,16 +83,16 @@ function changeBrightness(light, value){
             updateLightData(light, {"bri": value});
         }
     });
-};
+}
 
 function blinkLight(light, speed, repetition){
     let repeater = 0;
     const interval = setInterval(async () => {
         const state = await getLightData(light);
         if(state.on === true){
-            updateLightData(currentLight, { on : false });
+            updateLightData(light, { on : false });
         }else{
-            updateLightData(currentLight, { on : true });
+            updateLightData(light, { on : true });
             repeater++;
             if(repeater === repetition){
                 clearInterval(interval);
@@ -100,51 +102,98 @@ function blinkLight(light, speed, repetition){
     return interval;
 }
 
+function blinkAllLights(speed, repetition = Infinity) {
+    return lightIDs.map(light => blinkLight(light, speed, repetition));
+}
+
+function changeAllBrightness(value) {
+    forEachLight(light => changeBrightness(light, value));
+}
+
 function bombPlanted(){
     bombCountdown = 40;
-    updateLightData(currentLight, colors.bomb);
-    blinkEffect = blinkLight(currentLight, 1000);
+    forEachLight(light => updateLightData(light, colors.bomb));
+    blinkEffect = blinkAllLights(1000);
+
     timer = setInterval(() => {
-        bombCountdown--
+        bombCountdown--;
         if(bombCountdown === 30){
-            clearInterval(blinkEffect);
-            blinkEffect = blinkLight(currentLight, 750);
+            if(isTimerEnabled === true){
+                console.log("Timer: 30s");
+            }
+            blinkEffect.forEach(clearInterval);
+            blinkEffect = blinkAllLights(750);
         }
         if(bombCountdown === 20){
-            clearInterval(blinkEffect);
-            blinkEffect = blinkLight(currentLight, 500);
+            if(isTimerEnabled === true){
+                console.log("Timer: 20s");
+            }
+            blinkEffect.forEach(clearInterval);
+            blinkEffect = blinkAllLights(500);
         }
         if(bombCountdown === 12){
-            changeBrightness(currentLight, 50);
-            clearInterval(blinkEffect);
-            blinkEffect = blinkLight(currentLight, 250);
+            if(isTimerEnabled === true){
+                console.log("Timer: 12s");
+            }
+            changeAllBrightness(50);
+            blinkEffect.forEach(clearInterval);
+            blinkEffect = blinkAllLights(250);
+        }
+		if(bombCountdown === 10 && isTimerEnabled === true){
+            console.log("Timer: 10s");
+        }
+		if(bombCountdown === 9 && isTimerEnabled === true){
+            console.log("Timer: 9s");
+        }
+		if(bombCountdown === 8 && isTimerEnabled === true){
+            console.log("Timer: 8s");
+        }
+		if(bombCountdown === 7 && isTimerEnabled === true){
+            console.log("Timer: 7s");
+        }
+		if(bombCountdown === 6 && isTimerEnabled === true){
+            console.log("Timer: 6s");
         }
         if(bombCountdown === 5){
-            console.log("Timer at 5");
-            changeBrightness(currentLight, 100);
-            clearInterval(blinkEffect);
-            blinkEffect = blinkLight(currentLight, 100);
+            if(isTimerEnabled === true){
+                console.log("Timer: 5s");
+            }
+            changeAllBrightness(100);
+            blinkEffect.forEach(clearInterval);
+            blinkEffect = blinkAllLights(100);
+        }
+		if(bombCountdown === 4 && isTimerEnabled === true){
+            console.log("Timer: 4s");
+        }
+		if(bombCountdown === 3 && isTimerEnabled === true){
+            console.log("Timer: 3s");
         }
         if(bombCountdown === 2){
-            clearInterval(blinkEffect);
+            if(isTimerEnabled === true){
+                console.log("Timer: 2s");
+            }
+            blinkEffect.forEach(clearInterval);
             clearInterval(timer);
         }
-    }, 1000)
+		if(bombCountdown === 1 && isTimerEnabled === true){
+            console.log("Timer: 1s");
+        }
+    }, 1000);
 }
 
 function bombExploded(){
-    clearInterval(blinkEffect);
+    blinkEffect.forEach(clearInterval);
     bombCountdown = null;
-    updateLightData(currentLight, colors.exploded);
+    forEachLight(light => updateLightData(light, colors.exploded));
     console.log("BOOM");
 }
 
 function bombDefused(){
-    clearInterval(blinkEffect);
+    blinkEffect.forEach(clearInterval);
     bombCountdown = null;
-    updateLightData(currentLight, colors.defused);
+    forEachLight(light => updateLightData(light, colors.defused));
     console.log("Bomb has been defused");
-    blinkLight(currentLight, 100, 3);
+    blinkAllLights(100, 3);
 }
 
 function setUserTeamColor(){
@@ -157,13 +206,12 @@ function setUserTeamColor(){
             console.log("User is: " + userTeam);
         }
     }
-    updateLightData(currentLight, colors[userTeam]);
+    forEachLight(light => updateLightData(light, colors[userTeam]));
 }
 
 startScript();
 
 setInterval(() => {
-    
     try{
         let body = fs.readFileSync('gamestate.txt');
         gameState = JSON.parse(body);
@@ -171,36 +219,27 @@ setInterval(() => {
         console.log("Error while fetching game state.")
     }
 
-    // Verify if game is ongoing
     if(gameState.round){
-
-        // Bomb management
         if(gameState.round.bomb){
-            if(isBombPlanted === false){
-                if(gameState.round.bomb === "planted"){
-                    isBombPlanted = true;
-                    bombPlanted();
-                    console.log("Bomb has been planted");
-                }
+            if(isBombPlanted === false && gameState.round.bomb === "planted"){
+                isBombPlanted = true;
+                bombPlanted();
+                console.log("Bomb has been planted");
             }
             if(gameState.round.bomb === "exploded" && isBombExploded === false){
                 isBombExploded = true;
                 isBombPlanted = false;
                 bombExploded();
             }
-            if(isBombDefused === false){
-                if(gameState.round.bomb === "defused"){
-                   isBombPlanted = false;
-                   isBombDefused = true;
-                   bombDefused();
-               }
+            if(isBombDefused === false && gameState.round.bomb === "defused"){
+                isBombPlanted = false;
+                isBombDefused = true;
+                bombDefused();
             }
         }else{
             if(gameState.player && gameState.player.team){
                 setUserTeamColor();
-            }  
+            }
         }
     }
-
-
-}, 200)
+}, 200);

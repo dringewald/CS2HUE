@@ -14,7 +14,11 @@ CS2HUE enables Counter-Strike players to synchronize Philips Hue lights with the
 
 ## Installation
 
-1. Download the latest release from the [Releases](https://github.com/floranknz/CS2HUE/releases) page.
+1. Clone the repository or download the script files from the [Releases](https://github.com/floranknz/CS2HUE/releases) page.
+
+```bash
+git clone https://github.com/floranknz/CS2HUE.git
+```
 
 2. Copy the `gamestate_integration_cs2hue.cfg` file to your CS2 config directory :
 
@@ -30,7 +34,8 @@ C:\Program Files\Steam\steamapps\common\Counter-Strike Global Offensive\csgo\cfg
 {
     "BRIDGE_IP": "192.168.1.10",       // The IP address of your Hue bridge
     "API_KEY": "YOUR_API_KEY_HERE",    // The API key to access your Hue bridge
-    "LIGHT_ID": 0                      // The ID of the light you want to react to your game
+    "LIGHT_ID": "0, 1, 2",             // The IDs of the lights you want to react to your game
+    "SHOW_BOMB_TIMER": false           // (EXPERIMENTAL) Shows the remaining seconds of the bomb timer in the console
 }
 ```
 

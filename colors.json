@@ -1,33 +1,32 @@
 {
-    "bomb": {
-      "on": true,
-      "xy": [0.6904, 0.3091]
-    },
-    "CT": {
-      "on": true,
-      "bri": 20,
-      "xy": [0.1553, 0.1284]
-    },
-    "T": {
-      "on": true,
-      "bri": 20,
-      "xy": [0.5964, 0.3797]
-    },
-    "default": {
-      "on": true,
-      "colormode": "ct",
-      "ct": 399
-    },
-    "exploded": {
-      "on": true,
-      "colormode": "ct",
-      "ct": 318
-    },
-    "defused": {
-      "on": true,
-      "bri": 100,
-      "xy": [0.1553, 0.1284],
-      "transitionTime": 0
-    }
+  "bomb": {
+    "on": true,
+    "xy": [0.6904, 0.3091]
+  },
+  "CT": {
+    "on": true,
+    "bri": 20,
+    "xy": [0.1553, 0.1284]
+  },
+  "T": {
+    "on": true,
+    "bri": 20,
+    "xy": [0.5964, 0.3797]
+  },
+  "default": {
+    "on": true,
+    "colormode": "ct",
+    "ct": 399
+  },
+  "exploded": {
+    "on": true,
+    "colormode": "ct",
+    "ct": 318
+  },
+  "defused": {
+    "on": true,
+    "bri": 100,
+    "xy": [0.1553, 0.1284],
+    "transitionTime": 0
   }
-  
+}
