@@ -1,0 +1,23 @@
+{
+  "name": "cs2hue",
+  "version": "1.0.0",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dringewald/CS2HUE.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/dringewald/CS2HUE/issues"
+  },
+  "homepage": "https://github.com/dringewald/CS2HUE#readme",
+  "description": "",
+  "devDependencies": {
+    "electron": "^35.1.3"
+  }
+}

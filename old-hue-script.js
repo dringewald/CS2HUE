@@ -3,7 +3,7 @@ const fs = require('fs');
 const config = require('./config.json');
 const colors = require('./colors.json');
 
-const hueAPI = `http://${config.BRIDGE_IP}/api/${config.API_KEY}`
+const hueAPI = http://${config.BRIDGE_IP}/api/${config.API_KEY}
 
 const lightIDs = config.LIGHT_ID.split(',').map(id => id.trim());
 let isTimerEnabled = config.SHOW_BOMB_TIMER;
@@ -23,7 +23,7 @@ function forEachLight(callback) {
 
 function startScript(){
     console.log("Connecting...");
-    fetch(`${hueAPI}/lights/${lightIDs[0]}`)
+    fetch(${hueAPI}/lights/${lightIDs[0]})
     .then(async response => {
         console.log("Connected to Hue bridge.");
         const data = await response.json();
@@ -50,7 +50,7 @@ function startScript(){
 
 async function getLightData(light) {
     try {
-        const response = await fetch(`${hueAPI}/lights/${light}`);
+        const response = await fetch(${hueAPI}/lights/${light});
         const body = await response.json();
         return body.state;
     } catch(error) {
@@ -59,7 +59,7 @@ async function getLightData(light) {
 }
 
 function updateLightData(light, body){
-    fetch(`${hueAPI}/lights/${light}/state`, {
+    fetch(${hueAPI}/lights/${light}/state, {
         method: "PUT",
         body: JSON.stringify(body),
         headers: { "Content-Type": "application/json" }
@@ -230,6 +230,36 @@ function setUserTeamColor(){
 
 startScript();
 
+// Start local server to receive game state from CS2
+const server = http.createServer((req, res) => {
+    if (req.method === 'POST') {
+        console.log("Handling POST request...");
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+
+        let body = '';
+
+        req.on('data', data => {
+            body = data;
+        });
+
+        req.on('end', () => {
+            fs.writeFile('gamestate.txt', body, err => {
+                if (err) console.error("Error writing file: " + err);
+            });
+            res.end('');
+        });
+    } else {
+        console.log("Request received is not POST.");
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        const html = <html><body>HTTP Server at http://127.0.0.1:8080</body></html>;
+        res.end(html);
+    }
+});
+
+server.listen(8080, '127.0.0.1', () => {
+    console.log('Listening at http://127.0.0.1:8080');
+});
+
 setInterval(() => {
     try{
         let body = fs.readFileSync('gamestate.txt');
@@ -266,8 +296,13 @@ setInterval(() => {
                 bombDefused();
             }
         }
-
-		if (gameState.player && gameState.player.team && !isBombPlanted && !isBombExploded && !isBombDefused) {
+		if (
+			gameState.player &&
+			gameState.player.team &&
+			!isBombPlanted &&
+			!isBombExploded &&
+			!isBombDefused
+		) {
 			setUserTeamColor();
 		}
     }

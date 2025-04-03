@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>CS2 Hue Controller</title>
+        <style>
+            body {
+                font-family: sans-serif;
+                padding: 20px;
+                background: #1e1e1e;
+                color: #fff;
+            }
+
+            input,
+            button,
+            select {
+                margin: 5px 0;
+                padding: 8px;
+                width: 100%;
+            }
+
+            .section {
+                margin-bottom: 20px;
+            }
+        </style>
+    </head>
+
+    <body>
+        <h1>💣 CS2 Hue Bomb Control</h1>
+
+        <div class="section">
+            <label>Bridge IP:</label>
+            <input type="text" id="bridgeIP" placeholder="e.g. 192.168.1.100">
+
+            <label>API Key:</label>
+            <input type="text" id="apiKey" placeholder="Your Hue API Key">
+
+            <label>Light IDs (comma separated):</label>
+            <input type="text" id="lightIds" placeholder="e.g. 1,2,3">
+        </div>
+
+        <div class="section">
+            <label>Show Bomb Timer:</label>
+            <select id="showTimer">
+                <option value="true">Enabled</option>
+                <option value="false">Disabled</option>
+            </select>
+        </div>
+
+        <div class="section">
+            <h3>🎨 Edit Colors (from colors.json)</h3>
+            <div id="colorsDisplay" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px;"></div>
+            <button id="saveColors">💾 Save Colors</button>
+        </div>
+
+        <button id="saveConfig">💾 Save Config</button>
+        <button id="startScript">▶️ Start Script</button>
+
+        <pre id="log" style="background:#111;padding:10px;height:200px;overflow:auto;"></pre>
+
+        <script src="renderer.js"></script>
+    </body>
+</html>
