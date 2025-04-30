@@ -1,62 +1,119 @@
 <!DOCTYPE html>
 <html>
-    <head>
-        <title>CS2 Hue Controller</title>
-        <style>
-            body {
-                font-family: sans-serif;
-                padding: 20px;
-                background: #1e1e1e;
-                color: #fff;
-            }
 
-            input,
-            button,
-            select {
-                margin: 5px 0;
-                padding: 8px;
-                width: 100%;
-            }
+<head>
+  <title>CS2 Hue Controller</title>
+  <link rel="stylesheet" type="text/css" href="css/style.css">
+  <link rel="icon" type="image/png" href="/img/favicon/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/img/favicon/favicon.svg" />
+  <link rel="shortcut icon" href="/img/favicon/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/img/favicon/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="CS2Hue" />
+  <link rel="manifest" href="/img/favicon/site.webmanifest" />
+</head>
 
-            .section {
-                margin-bottom: 20px;
-            }
-        </style>
-    </head>
+<body>
+  <h1>💣 CS2 Hue Bomb Control</h1>
 
-    <body>
-        <h1>💣 CS2 Hue Bomb Control</h1>
+  <div class="section">
+    <label>Bridge IP:</label>
+    <div class="toggle-secret">
+      <input type="text" id="bridgeIP" class="secret-input" placeholder="The IP of your Hue Bridge"
+        title="The IP address of your Philips Hue Bridge. Find it via the Hue app, https://discovery.meethue.com/ or your router.">
+      <button class="reveal-btn" type="button">
+        <img src="img/eye-password-hide.svg" alt="toggle visibility" />
+      </button>
+    </div>
 
-        <div class="section">
-            <label>Bridge IP:</label>
-            <input type="text" id="bridgeIP" placeholder="e.g. 192.168.1.100">
+    <label>API Key:</label>
+    <div class="toggle-secret">
+      <input type="text" id="apiKey" class="secret-input" placeholder="Your Hue API Key"
+        title="Your authorized Hue API key. Needed to control the lights.">
+      <button class="reveal-btn" type="button">
+        <img src="img/eye-password-hide.svg" alt="toggle visibility" />
+      </button>
+    </div>
 
-            <label>API Key:</label>
-            <input type="text" id="apiKey" placeholder="Your Hue API Key">
+    <label>Server IP:</label>
+    <div class="toggle-secret">
+      <input type="text" id="serverHost" class="secret-input" placeholder="The IP of the Server"
+        title="Host address where the local server listens for game data. Leave as 127.0.0.1 unless you know what you're doing. Make sure you also update the ip in the gamestate_integration_cs2hue.cfg file inside your CS2 config folder if you change this value.">
+      <button class="reveal-btn" type="button">
+        <img src="img/eye-password-hide.svg" alt="toggle visibility" />
+      </button>
+    </div>
 
-            <label>Light IDs (comma separated):</label>
-            <input type="text" id="lightIds" placeholder="e.g. 1,2,3">
-        </div>
+    <label>Server Port:</label>
+    <div class="toggle-secret">
+      <input type="number" id="serverPort" class="secret-input" placeholder="The Port of the Server"
+        title="Port for the server. If 8080 is taken, change this to another available port. Make sure you also update the port in the gamestate_integration_cs2hue.cfg file inside your CS2 config folder if you change this value.">
+      <button class="reveal-btn" type="button">
+        <img src="img/eye-password-hide.svg" alt="toggle visibility" />
+      </button>
+    </div>
 
-        <div class="section">
-            <label>Show Bomb Timer:</label>
-            <select id="showTimer">
-                <option value="true">Enabled</option>
-                <option value="false">Disabled</option>
-            </select>
-        </div>
+    <label>Light IDs (comma separated):</label>
+    <input type="text" id="lightIds" class="secret-input visible" placeholder="e.g. 1,2,3"
+      title="Comma-separated list of Hue light IDs you want to control. Get IDs via the Hue API or developer tools.">
 
-        <div class="section">
-            <h3>🎨 Edit Colors (from colors.json)</h3>
-            <div id="colorsDisplay" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px;"></div>
-            <button id="saveColors">💾 Save Colors</button>
-        </div>
+    <label>Show Bomb Timer:</label>
+    <select id="showTimer" title="Enables extra logs showing the bomb countdown (only if a bomb is planted).">
+      <option value="true">Enabled</option>
+      <option value="false">Disabled</option>
+    </select>
 
-        <button id="saveConfig">💾 Save Config</button>
-        <button id="startScript">▶️ Start Script</button>
+    <label>HTML Logfile:</label>
+    <select id="htmlLog"
+      title="If true, saves the full session log into an HTML file under /logs/. Useful for debugging.">
+      <option value="true">Enabled</option>
+      <option value="false">Disabled</option>
+    </select>
 
-        <pre id="log" style="background:#111;padding:10px;height:200px;overflow:auto;"></pre>
+    <label>Debug Mode:</label>
+    <select id="debugMode" title="Enables extra [DEBUG] logs in the console for troubleshooting.">
+      <option value="true">Enabled</option>
+      <option value="false">Disabled</option>
+    </select>
 
-        <script src="renderer.js"></script>
-    </body>
+    <label>Live Log (max lines):</label>
+    <input type="number" id="liveLogNumber" class="secret-input visible" placeholder="1000"
+      title="Max number of log lines to keep in memory for the HTML live view. Adjust higher for long sessions if needed. Higher = More RAM">
+
+    <button id="saveConfig">💾 Save Config</button>
+    <button id="openConfig">📁 Open Config Folder</button>
+  </div>
+
+  <div class="section">
+    <h3>🎨 Edit Colors</h3>
+    <div id="colorsDisplay"></div>
+    <button id="saveColors">💾 Save Colors</button>
+  </div>
+
+  <div id="bombSettingsWrapper" class="section">
+    <h3>💣 Bomb Settings</h3>
+    <div id="bombStagesGrid"></div>
+    <button id="saveBombSettings">💾 Save Bomb Stages</button>
+  </div>
+
+  <div class="section" id="controlButtons">
+    <button id="startScript">▶️ Start Script</button>
+    <button id="stopScript">⏹ Stop Script</button>
+    <button id="reloadConfig">⚙️ Reload Config</button>
+    <button id="restartScript">🔁 Restart Script</button>
+  </div>
+
+  <div class="section">
+    <div class="log-header">
+      <h3 class="log-title">📄 Log</h3>
+      <div class="log-actions">
+        <button id="openDocBtn" class="log-btn" type="button" style="display: none;">🌐 Open Doc</button>
+        <button id="openLogBtn" class="log-btn" type="button" style="display: none;">🌐 Open Log</button>
+      </div>
+    </div>
+    <pre id="log"></pre>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+
 </html>

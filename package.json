@@ -1,23 +1,51 @@
 {
   "name": "cs2hue",
   "version": "1.0.0",
+  "description": "Control Hue Lights with CS2",
   "main": "main.js",
-  "scripts": {
-    "start": "electron ."
-  },
+  "author": "dringewald",
+  "license": "ISC",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/dringewald/CS2HUE.git"
+    "url": "https://github.com/dringewald/CS2HUE.git"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "homepage": "https://github.com/dringewald/CS2HUE#readme",
   "bugs": {
     "url": "https://github.com/dringewald/CS2HUE/issues"
   },
-  "homepage": "https://github.com/dringewald/CS2HUE#readme",
-  "description": "",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder"
+  },
   "devDependencies": {
-    "electron": "^35.1.3"
+    "electron": "^35.1.3",
+    "electron-builder": "^24.14.1"
+  },
+  "build": {
+    "appId": "de.dringewald.cs2hue",
+    "files": [
+      "**/*",
+      "!gamestate.txt",
+      "!examplePOST.json",
+      "!previousState.json",
+      "!logs/**/*",
+      "!node_modules/*/.bin",
+      "!node_modules/.cache/**/*"
+    ],
+    "directories": {
+      "buildResources": "build"
+    },
+    "win": {
+      "icon": "build/icons/icon.ico",
+      "target": "nsis"
+    },
+    "mac": {
+      "icon": "build/icons/icon.icns",
+      "target": "dmg"
+    },
+    "linux": {
+      "icon": "build/icons/512x512.png",
+      "target": "AppImage"
+    }
   }
 }

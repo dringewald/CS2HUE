@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>CS2Hue Help</title>
+    <link rel="stylesheet" type="text/css" href="css/style.css">
+    <link rel="icon" type="image/png" href="img/favicon/favicon-96x96.png" sizes="96x96" />
+    <link rel="icon" type="image/svg+xml" href="img/favicon/favicon.svg" />
+    <link rel="shortcut icon" href="img/favicon/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="img/favicon/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-title" content="CS2Hue" />
+    <link rel="manifest" href="img/favicon/site.webmanifest" />
+</head>
+
+<body>
+    <div class="toggle-section">
+        <div class="theme-toggle-container">
+            <span class="toggle-text">🌙 Dark Mode</span>
+            <label class="toggle-switch">
+                <input type="checkbox" id="themeToggleCheckbox" onchange="toggleTheme()" />
+                <span class="toggle-slider"></span>
+            </label>
+        </div>
+    </div>
+
+    <h1>💣 CS2Hue: Hue Bomb Control for CS2</h1>
+
+    <div id="toc" class="section">
+        <h2>📚 Table of Contents</h2>
+        <ul class="toc-list">
+            <li><a href="#what-is-cs2hue">💡 What is CS2Hue?</a></li>
+            <li><a href="#features">🎮 Features</a></li>
+            <li><a href="#quickstart">🚀 Quickstart</a></li>
+            <li><a href="#hue-info">🔬 Hue Info</a></li>
+            <li><a href="#config">⚙️ Configuration</a></li>
+            <li><a href="#logs">📓 Logs</a></li>
+            <li><a href="#faq">🧠 FAQ</a></li>
+            <li><a href="#how-it-works">🧹 How It Works</a></li>
+            <li><a href="#links">🌍 Links</a></li>
+            <li><a href="#credits">💬 Credits</a></li>
+        </ul>
+    </div>
+
+    <div id="what-is-cs2hue" class="section">
+        <h2>💡 What is CS2 Hue?</h2>
+        <p>
+            <strong>CS2Hue</strong> syncs your Philips Hue lights with bomb events in CS2.</br>
+            Reacts to plants, defuses, wins/losses — making your room part of the action!
+        </p>
+        <a class="btn" href="https://github.com/dringewald/CS2HUE/releases">Download from GitHub</a>
+    </div>
+
+    <div id="features" class="section">
+        <h2>🎮 Features</h2>
+        <ul>
+            <li>🎯 Live CS2 bomb event detection</li>
+            <li>💡 Philips Hue dynamic lighting</li>
+            <li>🎨 Custom team/bomb/menu colors</li>
+            <li>⏱️ Adaptive bomb timer effects</li>
+            <li>🌐 Optional live HTML log viewer</li>
+            <li>⚙️ Full GUI for configuration</li>
+            <li>🛡️ Debug mode for troubleshooting</li>
+            <li>🔄 Auto-reconnect + fail-safe</li>
+        </ul>
+    </div>
+
+    <div id="quickstart" class="section">
+        <h2>🚀 Quickstart</h2>
+        <ol>
+            <li>Download the app from <a href="https://github.com/dringewald/CS2HUE/releases">GitHub Releases</a></li>
+            <li>Unzip it anywhere you like</li>
+            <li>Copy <code>gamestate_integration_cs2hue.cfg</code> to your CS2 config folder:
+                <pre>C:\Program Files (x86)\Steam\steamapps\common\Counter-Strike Global Offensive\csgo\cfg</pre>
+            </li>
+            <li>Launch the application</li>
+            <li>Enter your Hue Bridge info (IP, API key, Light IDs)</li>
+            <li>Hit <strong>Start</strong> 🎯</li>
+        </ol>
+    </div>
+
+    <div id="hue-info" class="section">
+        <h2>🔬 How to Find Your Hue Info</h2>
+        <h3>1. Hue Bridge IP</h3>
+        <ol>
+            <li>Make sure to be on the same network as your hue bridge</li>
+            <li>Visit <a href="https://discovery.meethue.com/" target="_blank">https://discovery.meethue.com/</a></li>
+            <li>Copy your IP address.</br>
+                <img src="img/hue-ip-info.png" alt="Hue Bridge IP discovery example">
+            </li>
+        </ol>
+        <h3>2. API Key</h3>
+        <ol>
+            <li>Now use the copied IP to open the following link in your Browser: http://YOUR_BRIDGE_IP/debug/clip.html
+            </li>
+            <li>Enter the following into the URL field:
+                <pre>/api</pre>
+            </li>
+            <li>Enter this into the <strong>Message Body</strong> field:
+                <pre>{
+    "devicetype":"CS2HUE#device"
+}</pre>
+                <p style="margin-bottom: 0;">It should look like this:</p>
+                <img src="img/request-api-key.png" alt="API key request" style="margin-top: 0;" />
+            </li>
+            <li>Now Press the Button on the Bridge.</li>
+            <li>After you pressed the button click on "POST" on the webpage.</li>
+            <li>Now the <strong>Command Response</strong> field should give you your API key. Make sure to copy it
+                <br /><img src="img/copy-api-key.png" alt="Copy your API key" />
+            </li>
+        </ol>
+
+        <h3>3. Light IDs</h3>
+        <ol>
+            <li>Open the same link again, where you retrieved your API key. http://YOUR_BRIDGE_IP/debug/clip.html</li>
+            <li>Now use your copied API key to type in the following into the <strong>URL</strong> field:
+                <pre>/api/YOUR_API_KEY/lights</pre>
+                It should look like this:<br />
+                <img src="img/request-light-info.png" alt="Request light info" style="margin-top: 0;" />
+            </li>
+            <li>Now press the <strong>GET</strong> button.</li>
+            <li>You will now get a lot of Information in the <strong>Command Response</strong>.</li>
+            <li>Look for the name that you gave your light (You've done that on the first setup).</li>
+            <li>Now scroll a bit up. You find the ID of your light, right above the name.</li>
+            <li>In the following Screenshot my lights name is "PC-Links". When I scroll up, it has the ID 14.<br /><img
+                    src="img/find-light-id.png" alt="Light ID example" /></li>
+            <li>Copy the IDs of every light that you want to be synced with CS. In my case the IDs are 13 and 14.</li>
+            <li>Input the IP of your bridge, the API-key and the IDs of the lights into the fields of the GUI.<br />
+                <img src="img/gui-config-example.png" alt="Example Config" />
+            </li>
+            <li>Don't forget to save the config by clicking on the <code>💾 Save Config</code> button.</li>
+            <li>Now test the lights by clicking on the test button of one of the colors.<br />If the light shines, then
+                you've done it correctly, if not, then take a look at the log box.</li>
+            <li>If you've done everything correctly, then it should look like this:</br><img
+                    src="img/color-test-logbox.png" alt="Logbox shows color test" /></li>
+        </ol>
+    </div>
+
+    <div id="config" class="section">
+        <h2>⚙️ Configuration Overview</h2>
+        <div class="config-table-wrapper">
+            <table class="config-table">
+                <thead>
+                    <tr>
+                        <th>Key</th>
+                        <th>Default Value</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>BRIDGE_IP</code></td>
+                        <td><code>"192.168.1.10"</code></td>
+                        <td>The IP address of your Philips Hue Bridge.</td>
+                    </tr>
+                    <tr>
+                        <td><code>API_KEY</code></td>
+                        <td><code>"YOUR_API_KEY_HERE"</code></td>
+                        <td>Your authorized Hue API key.</td>
+                    </tr>
+                    <tr>
+                        <td><code>SERVER_HOST</code></td>
+                        <td><code>"127.0.0.1"</code></td>
+                        <td>Host address for the local server.<br />Must match the IP in your
+                            <code>gamestate_integration_cs2hue.cfg</code>.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><code>SERVER_PORT</code></td>
+                        <td><code>8080</code></td>
+                        <td>Port the server listens on. Must match the port in your
+                            <code>gamestate_integration_cs2hue.cfg</code>.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><code>LIGHT_ID</code></td>
+                        <td><code>"0, 1, 2"</code></td>
+                        <td>Comma-separated Hue light IDs to control.</td>
+                    </tr>
+                    <tr>
+                        <td><code>SHOW_BOMB_TIMER</code></td>
+                        <td><code>false</code></td>
+                        <td>Show extra bomb countdown logs when planted.</td>
+                    </tr>
+                    <tr>
+                        <td><code>HTML_LOG</code></td>
+                        <td><code>false</code></td>
+                        <td>Save a session log as an HTML file under <code>/logs/</code>.</td>
+                    </tr>
+                    <tr>
+                        <td><code>DEBUG_MODE</code></td>
+                        <td><code>false</code></td>
+                        <td>Enable verbose debug logging in console.</td>
+                    </tr>
+                    <tr>
+                        <td><code>LIVE_LOG_LINES</code></td>
+                        <td><code>1000</code></td>
+                        <td>Maximum log lines to store for the live HTML log viewer.</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>💡 You can configure all of these inside the app or edit
+            <code>config.json</code>
+            manually (not recommended for beginners).
+        </p>
+
+        <p style="margin-bottom: 0;">Example <code>config.json</code>:</p>
+        <pre style="margin-top: 0">{
+    "BRIDGE_IP": "192.168.1.10",
+    "API_KEY": "YOUR_API_KEY_HERE",
+    "SERVER_HOST": "127.0.0.1",
+    "SERVER_PORT": 8080,
+    "LIGHT_ID": "0, 1, 2",
+    "SHOW_BOMB_TIMER": false,
+    "HTML_LOG": false,
+    "DEBUG_MODE": false,
+    "LIVE_LOG_LINES": 1000
+}</pre>
+        <div class="note">
+            ⚠️ <strong>Important:</strong> The values of <code>SERVER_HOST</code> and <code>SERVER_PORT</code> in your
+            configuration must exactly match the ones defined in your <code>gamestate_integration_cs2hue.cfg</code> file
+            —
+            otherwise, CS2 won’t be able to send data to the app.
+            <br /><br />
+            💡 You can also set <code>SERVER_HOST</code> to the IP address of another local device on your network.
+            As long as the app is running on that device and your firewall allows the connection, this setup will work.
+        </div>
+    </div>
+
+    <div id="logs" class="section">
+        <h2>📓 Logs</h2>
+        <p>
+            CS2Hue includes a powerful built-in logging system that helps you track all game and light events,
+            troubleshoot errors, and optionally export logs for deeper analysis.
+        </p>
+
+        <h3>✨ Key Features</h3>
+        <ul>
+            <li><strong>Live Log View:</strong> Starts automatically when CS2 sync is activated</li>
+            <li><strong>Open in Browser:</strong> A button appears in the app to launch the live log viewer</li>
+            <li><strong>In-memory log lines</strong> limited by <code>LIVE_LOG_LINES</code> config value</li>
+            <li><strong>Log levels:</strong> INFO, DEBUG, WARN, ERROR</li>
+            <li><strong>Dark/Light mode toggle</strong> in viewer</li>
+            <li><strong>Optional download of live log session</strong> via the "Save Log" button</li>
+        </ul>
+
+        <div class="note">
+            ⚠️ <strong>Note:</strong> The live log view only works while the sync is active. Once you stop the sync,
+            the view stops updating and the log can no longer be saved.
+        </div>
+
+        <h3>📁 HTML_LOG Option</h3>
+        <p>
+            <code>HTML_LOG</code> in your <code>config.json</code> controls whether logs are saved to disk.
+            These are completely separate from the live log and can be reviewed later.
+        </p>
+        <p>
+            If enabled, session logs are flushed to HTML files inside the <code>/logs/</code> directory.
+            A new file is created each day, named like: <code>2025-04-29-log.html</code>
+        </p>
+
+        <h3>📍 HTML Log Viewer Features</h3>
+        <ul>
+            <li>Timestamped log lines with styled levels</li>
+            <li>Dark/Light mode toggle with saved preference</li>
+            <li>Filter checkboxes: INFO / WARN / ERROR / DEBUG</li>
+            <li>Auto Reload toggle for live updates (polls every 10s)</li>
+            <li>"Save Log" to download a clean, standalone copy</li>
+        </ul>
+
+        <h3>🧰 Log Output in App</h3>
+        <p>The app window also shows a live log box under the <strong>📄 Log</strong> section.
+        </p>
+        <ul>
+            <li>Only <code>[INFO]</code>, <code>[WARN]</code> and <code>[ERROR]</code> lines appear there</li>
+            <li>Content scrolls automatically as new logs appear</li>
+            <li>Button <strong>🌐 Open Log</strong> shows when sync is running</li>
+        </ul>
+
+        <h3>🛠️ Developer Notes</h3>
+        <ul>
+            <li>Logs are buffered in memory and flushed when needed</li>
+            <li><code>setRendererLogFunction()</code> links internal logs to both the GUI and browser</li>
+            <li><code>[DEBUG]</code> messages are printed to the console when <code>DEBUG_MODE</code> is
+                <code>true</code>
+            </li>
+        </ul>
+    </div>
+
+    <div id="faq" class="section">
+        <h2>🧠 FAQ</h2>
+        <h3>💡 My lights don't react! What should I check?</h3>
+        <ul>
+            <li>Make sure your Bridge IP/API Key are correct.</li>
+            <li>Ensure lights are <strong>not</strong> in "Entertainment/Sync" mode</li>
+            <li>Ensure the CS2 config file is updating</li>
+            <li>Also try testing with first and check the log box.</li>
+        </ul>
+
+        <h3>🧨 Can I add custom bomb timings??</h3>
+        <p>Yes, configure them in the app's Bomb Settings UI.</p>
+
+        <h3>🚫 Can I get a VAC ban for using CS2Hue?</h3>
+        <ul>
+            <li>❗ <strong>No.</strong> CS2Hue only <strong>reads</strong> gamestate files — it does <strong>not
+                    modify</strong> the game, <strong>inject code</strong>, or <strong>interact with the CS2
+                    process</strong> in any way.</li>
+            <li>Gamestate files are widely used by official RGB integrations from companies like
+                <strong>Logitech</strong>, <strong>SteelSeries</strong>, and others.
+            </li>
+            <li>⚠️ A VAC ban is therefore <strong>extremely unlikely</strong> and <strong>practically ruled out</strong>
+                under normal usage.</li>
+            <li>⚡ <strong>However</strong>, I cannot guarantee or accept any responsibility for potential bans or other
+                consequences. <strong>Use at your own risk.</strong></li>
+        </ul>
+    </div>
+
+    <div id="how-it-works" class="section">
+        <h2>🧹 How It Works</h2>
+        <ul>
+            <li>🟡 CS2 sends real-time game information to the server defined in the
+                <code>gamestate_integration_cs2hue.cfg</code> file.
+            </li>
+            <li>🟢 CS2Hue spins up a lightweight local server listening on the configured IP and port.</li>
+            <li>🔁 The app receives game events almost instantly using a fast polling system.</li>
+            <li>🌈 Based on those events, CS2Hue dynamically updates your Hue lights to match the in-game situation.
+            </li>
+        </ul>
+    </div>
+
+    <div id="links" class="section">
+        <h2>🔗 Useful Links</h2>
+        <ul>
+            <li><a href="https://github.com/dringewald/CS2HUE/releases" target="_blank">💾 Download CS2Hue (GitHub
+                    Releases)</a></li>
+            <li><a href="https://www.electronjs.org/" target="_blank">✨ Built with Electron</a></li>
+            <li><a href="https://www.counter-strike.net/cs2" target="_blank">🎮 CS2 Official Website</a></li>
+            <li><a href="https://opensource.org/licenses/MIT" target="_blank">🔒 MIT License</a></li>
+            <li><a href="https://openai.com/chatgpt" target="_blank">🤖 Created with ChatGPT</a></li>
+            <li><a href="https://discord.gg/jymDumdFVU" target="_blank">🖊️ Join the Discord Community</a></li>
+            <li><a href="https://www.paypal.com/paypalme/NoXHolt" target="_blank">💳 Support via PayPal</a></li>
+        </ul>
+    </div>
+
+    <div id="credits" class="section">
+        <h2>💬 Credits</h2>
+        <p>
+            Project by <strong><a href="https://github.com/dringewald" target="_blank">Dustin Ringewald</a></strong>.
+        </p>
+        <p>Special thanks to:</p>
+        <ul>
+            <li>Valve, for the CS2 Gamestate integration</li>
+            <li>Node.js & Electron communities</li>
+            <li>Hue Developer community</li>
+            <li>
+                ✨ Massive thanks to <a href="https://github.com/floranknz" target="_blank">floranknz</a>
+                for the original <a href="https://github.com/floranknz/CS2HUE" target="_blank">CS2HUE</a> idea and
+                script!
+            </li>
+        </ul>
+    </div>
+
+    <button id="scrollToTopBtn" class="scroll-top-btn hidden" title="Scroll to top">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18">
+            <path d="M4 8l5 -5l5 5l-1 1l-4 -4l-4 4ZM4 12l5 -5l5 5l-1 1l-4 -4l-4 4Z" />
+        </svg>
+    </button>
+    <script src="js/scroll-to-top.js"></script>
+    <script src="js/toggle-theme.js"></script>
+</body>
+
+</html>

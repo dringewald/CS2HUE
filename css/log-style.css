@@ -1,0 +1,224 @@
+:root {
+    color-scheme: light dark;
+    --bg-color: #ffffff;
+    --text-color: #000000;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg-color: #121212;
+        --text-color: #eeeeee;
+    }
+}
+
+html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+}
+
+body {
+    display: flex;
+    flex-direction: column;
+    font-family: monospace;
+    background: var(--bg-color);
+    color: var(--text-color);
+    transition: background 0.3s ease, color 0.3s ease;
+}
+
+.page-wrapper {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    width: 100vw;
+    height: 100vh;
+    box-sizing: border-box;
+    padding: 10px;
+    overflow: hidden;
+}
+
+.log-header {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    gap: 8px;
+}
+
+.log-header h2 {
+    margin: 0;
+    font-size: 20px;
+    color: var(--text-color);
+}
+
+.toggle-section {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.theme-toggle-container {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.toggle-text {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-color);
+    white-space: nowrap;
+}
+
+.toggle-switch {
+    position: relative;
+    width: 40px;
+    height: 20px;
+    display: inline-block;
+}
+
+.toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.toggle-slider {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #666;
+    border-radius: 20px;
+    transition: 0.4s;
+}
+
+.toggle-slider::before {
+    content: "";
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    left: 2px;
+    top: 50%;
+    transform: translateY(-50%);
+    background-color: white;
+    border-radius: 50%;
+    transition: 0.4s;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+    background: linear-gradient(to right, #f9d423, #ff4e50);
+}
+
+.toggle-switch input:checked + .toggle-slider::before {
+    transform: translate(20px, -50%);
+}
+
+.log-line {
+    padding: 8px 12px;
+    border-radius: 6px;
+    margin: 6px 0;
+    display: flex;
+    gap: 8px;
+}
+
+.level { font-weight: bold; min-width: 70px; }
+.time { color: #999; min-width: 170px; }
+.msg { flex-grow: 1; }
+
+.save-log-btn {
+    padding: 10px 16px;
+    font-size: 14px;
+    font-weight: bold;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    background: #ffcc00;
+    color: #000;
+    transition: background 0.2s ease;
+}
+
+.save-log-btn:hover {
+    background: #ffd633;
+}
+
+#logFilter {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 16px;
+    padding: 8px 12px;
+    border-radius: 8px;
+}
+
+#logFilter label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-color);
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(0, 0, 0, 0.15);
+    padding: 6px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    flex: 1 1 120px;
+}
+
+#logFilter label:hover {
+    background: rgba(255, 255, 255, 0.15);
+}
+
+#logFilter input[type="checkbox"] {
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    border: 2px solid #888;
+    border-radius: 3px;
+    background: white;
+    cursor: pointer;
+    position: relative;
+    transition: all 0.2s ease;
+}
+
+#logFilter input[type="checkbox"]:checked {
+    background-color: #4caf50;
+    border-color: #4caf50;
+}
+
+#logFilter input[type="checkbox"]:checked::before {
+    content: "✓";
+    color: white;
+    position: absolute;
+    top: -1px;
+    left: 3px;
+    font-size: 12px;
+    line-height: 1;
+}
+
+#log-container {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    margin-top: 10px;
+    margin-bottom: 0;
+    padding-right: 4px;
+    max-height: 100%;
+}
+
+@media (max-width: 600px) {
+    .log-header h2 {
+        font-size: 18px;
+    }
+    .toggle-text {
+        font-size: 13px;
+    }
+    .save-log-btn {
+        font-size: 13px;
+        padding: 8px 12px;
+    }
+}

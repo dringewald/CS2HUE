@@ -1,32 +1,89 @@
 {
-  "bomb": {
-    "on": true,
-    "xy": [0.6904, 0.3091]
-  },
-  "CT": {
-    "on": true,
-    "bri": 20,
-    "xy": [0.1553, 0.1284]
-  },
-  "T": {
-    "on": true,
-    "bri": 20,
-    "xy": [0.5964, 0.3797]
-  },
-  "default": {
-    "on": true,
-    "colormode": "ct",
-    "ct": 399
-  },
-  "exploded": {
-    "on": true,
-    "colormode": "ct",
-    "ct": 318
-  },
-  "defused": {
-    "on": true,
-    "bri": 100,
-    "xy": [0.1553, 0.1284],
-    "transitionTime": 0
-  }
+    "menu": {
+        "bri": 100,
+        "x": 0.3227,
+        "y": 0.329,
+        "useCt": false,
+        "enabled": true
+    },
+    "CT": {
+        "bri": 20,
+        "x": 0.1553,
+        "y": 0.1284,
+        "useCt": false,
+        "enabled": true
+    },
+    "T": {
+        "bri": 20,
+        "x": 0.5964,
+        "y": 0.3797,
+        "useCt": false,
+        "enabled": true
+    },
+    "bomb": {
+        "enabled": true,
+        "x": 0.675,
+        "y": 0.322,
+        "bri": 25,
+        "initialTime": 40,
+        "initialBlinkSpeed": 1000,
+        "stages": {
+            "30": {
+                "bri": 20,
+                "speed": 750
+            },
+            "20": {
+                "bri": 35,
+                "speed": 500
+            },
+            "12": {
+                "bri": 50,
+                "speed": 250
+            },
+            "5": {
+                "bri": 100,
+                "speed": 150
+            },
+            "2": {
+                "bri": 150,
+                "speed": 0
+            }
+        }
+    },
+    "default": {
+        "bri": 100,
+        "x": 0.2952,
+        "y": 0.5825,
+        "useCt": false,
+        "enabled": true
+    },
+    "exploded": {
+        "bri": 100,
+        "x": 0.5,
+        "y": 0.5,
+        "ct": 318,
+        "useCt": false,
+        "enabled": true
+    },
+    "defused": {
+        "bri": 100,
+        "x": 0.1553,
+        "y": 0.1284,
+        "useCt": false,
+        "enabled": true
+    },
+    "win": {
+        "bri": 254,
+        "x": 0.3246,
+        "y": 0.5805,
+        "useCt": false,
+        "enabled": true
+    },
+    "lose": {
+        "bri": 254,
+        "x": 0.6401,
+        "y": 0.33,
+        "useCt": false,
+        "enabled": true
+    }
 }
