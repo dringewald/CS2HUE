@@ -1,12 +1,33 @@
-const { info, warn, error, debug, setHtmlLogEnabled, setDebugMode, setRendererLogFunction, setMaxSessionLines } = require('./logger');
-const { startScript, stopScript, isScriptRunning, anyLightInSyncMode, setBasePath } = require('./logic.js');
+const { info, warn, error, debug, setHtmlLogEnabled, setDebugMode, setRendererLogFunction, setMaxSessionLines, initializeLogger } = require('./logger');
+const { startScript, stopScript, isScriptRunning, anyLightInSyncMode, getHueAPI } = require('./logic.js');
+const { setBasePath, getConfigPath, getColorsPath } = require('./paths');
 const { ipcRenderer } = require('electron');
 const fs = require('fs');
 const path = require('path');
-const { config } = require('process');
 let scriptIsRunning = false;
-let configPath;
-let colorsPath;
+let lightIDs = [];
+let lightIDsReady = false;
+
+ipcRenderer.on('set-light-ids', (event, ids) => {
+    lightIDs = ids;
+    lightIDsReady = true;  // Mark lightIDs as ready
+    debug("🔧 lightIDs set in renderer:", lightIDs);
+});
+
+ipcRenderer.on('reset-lights', async () => {
+    if (isTestingColor) {
+        info("🔙 Stopping color test and resetting lights...");
+        await restorePreviousLightState();
+        isTestingColor = false;
+        testedColorName = null;
+    }
+
+    ipcRenderer.send('lights-reset-complete');
+});
+
+ipcRenderer.on('app-is-shutting-down', () => {
+    document.body.innerHTML = '<h1 style="color:white;text-align:center">Shutting down...</h1>';
+});
 
 setRendererLogFunction((message) => {
     if (
@@ -46,7 +67,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     await setupPaths(defaultConfigPath, defaultColorsPath);
     await initializeLogger();
-    
+
     initializeApp();
 });
 
@@ -74,9 +95,9 @@ function initializeApp() {
 
     // Load and fill config
     let config = {};
-    if (fs.existsSync(configPath)) {
+    if (fs.existsSync(getConfigPath())) {
         try {
-            config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+            config = JSON.parse(fs.readFileSync(getConfigPath(), 'utf-8'));
 
             // Load log to HTML file and Debug mode
             setHtmlLogEnabled(config.HTML_LOG);
@@ -84,6 +105,11 @@ function initializeApp() {
             if (config.LIVE_LOG_LINES !== undefined) {
                 setMaxSessionLines(config.LIVE_LOG_LINES);
             }
+
+            // Set light IDs from config
+            lightIDs = config.LIGHT_ID.split(',').map(id => id.trim());
+            lightIDsReady = true;  // Mark lightIDs as ready
+            ipcRenderer.send('set-light-ids', lightIDs); // Send the light IDs to renderer
 
             document.getElementById('bridgeIP').value = config.BRIDGE_IP || '';
             debug('Bridge IP field value:', document.getElementById('bridgeIP').value);
@@ -103,13 +129,13 @@ function initializeApp() {
             debug('debugMode field value:', document.getElementById('debugMode').value);
             document.getElementById('liveLogNumber').value = config.LIVE_LOG_LINES || 1000;
             debug('liveLogNumber field value:', document.getElementById('liveLogNumber').value);
-
+            
             info("🔧 Loaded config.json");
         } catch (err) {
             error(`❌ Failed to parse config.json: ${err.message}`);
         }
     } else {
-        warn("⚠️ config.json not found. Please fill out the form and save.");
+        console.warn("⚠️ config.json not found. Please fill out the form and save.");
     }
 
     const debugSelect = document.getElementById('debugMode');
@@ -139,7 +165,7 @@ function initializeApp() {
             LIVE_LOG_LINES: document.getElementById('liveLogNumber').value || 1000,
         };
 
-        fs.writeFileSync(configPath, JSON.stringify(config, null, 4));
+        fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 4));
         info("✅ Config saved.");
 
         // 🔁 Reload fields
@@ -147,22 +173,30 @@ function initializeApp() {
         info("🔁 Reloaded config fields after saving.");
     });
 
-    document.getElementById('startScript').addEventListener('click', () => {
+    document.getElementById('startScript').addEventListener('click', async () => {
+        if (!lightIDsReady) {
+            warn("⚠️ lightIDs not ready, cannot start script.");
+            return;
+        }
+    
         if (isTestingColor) {
             warn("🚫 Cannot start script while color test is active.");
             return;
         }
         info("▶️ Starting bomb script...");
-        startScript();
+        await startScript();
         scriptIsRunning = true;
+        ipcRenderer.send('set-script-running', true);
         updateLogButtonVisibility();
     });
 
     document.getElementById('stopScript').addEventListener('click', () => {
-        info("⏹ Stopping script...");
-        stopScript();
+        info("🛑 Stopping script...");
+        stopScript(getHueAPI());
         scriptIsRunning = false;
+        ipcRenderer.send('set-script-running', false);
         updateLogButtonVisibility();
+        info("✅ Script stopped!")
     });
 
     document.getElementById('reloadConfig').addEventListener('click', () => {
@@ -177,9 +211,12 @@ function initializeApp() {
         }
         info("🔁 Restarting Script...");
         reloadSettings();
-        stopScript();
+        stopScript(getHueAPI());
+        scriptIsRunning = false;
+        ipcRenderer.send('set-script-running', false);
         startScript();
         scriptIsRunning = true;
+        ipcRenderer.send('set-script-running', true);
         updateLogButtonVisibility();
     });
 
@@ -198,7 +235,7 @@ function initializeApp() {
     });
 
     document.getElementById('openConfig').addEventListener('click', () => {
-        const folderPath = path.dirname(configPath);
+        const folderPath = path.dirname(getConfigPath());
         ipcRenderer.invoke('open-folder', folderPath);
     });
 
@@ -382,7 +419,7 @@ function loadColors() {
     const colorsContainer = document.getElementById('colorsDisplay');
     colorsContainer.innerHTML = '';
 
-    const colors = JSON.parse(fs.readFileSync(colorsPath, 'utf-8'));
+    const colors = JSON.parse(fs.readFileSync(getColorsPath(), 'utf-8'));
 
     let needsMigration = false;
 
@@ -412,7 +449,7 @@ function loadColors() {
     });
 
     if (needsMigration) {
-        fs.writeFileSync(colorsPath, JSON.stringify(colors, null, 4));
+        fs.writeFileSync(getColorsPath(), JSON.stringify(colors, null, 4));
         info("✅ Migrated old xy format to x/y and saved to colors.json");
     }
 
@@ -650,6 +687,7 @@ function loadColors() {
                 isTestingColor = false;
                 testedColorName = null;
                 testButton.textContent = '💡 Test';
+                ipcRenderer.send('color-test-status', isTestingColor);
             } else {
                 if (isTestingColor) {
                     warn(`⚠️ Already testing "${testedColorName}". Stop that first.`);
@@ -663,10 +701,13 @@ function loadColors() {
                 }
 
                 // 🧠 Save current state
-                if (!fs.existsSync(configPath)) return;
-                const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+                if (!fs.existsSync(getConfigPath())) return;
+                const config = JSON.parse(fs.readFileSync(getConfigPath(), 'utf-8'));
                 const ids = config.LIGHT_ID.split(',').map(id => id.trim());
+                ipcRenderer.send('set-light-ids', ids);
+
                 const hueAPI = `http://${config.BRIDGE_IP}/api/${config.API_KEY}`;
+                ipcRenderer.send('set-hue-api', `http://${config.BRIDGE_IP}/api/${config.API_KEY}`);
 
                 // 🚫 Block if lights are in sync mode
                 const inSync = await anyLightInSyncMode();
@@ -691,7 +732,7 @@ function loadColors() {
                 }
 
                 // 💡 Send test color
-                const color = JSON.parse(fs.readFileSync(colorsPath, 'utf-8'))[name];
+                const color = JSON.parse(fs.readFileSync(getColorsPath(), 'utf-8'))[name];
                 const body = {
                     on: true,
                     bri: color.bri ?? 200
@@ -721,6 +762,7 @@ function loadColors() {
                 testedColorName = name;
                 testButton.textContent = '⛔ Stop Test';
                 info(`🎯 Testing color "${name}"...`);
+                ipcRenderer.send('color-test-status', isTestingColor);
 
                 let watchdogInterval = setInterval(async () => {
                     if (!isTestingColor) {
@@ -747,6 +789,7 @@ function loadColors() {
                         isTestingColor = false;
                         testedColorName = null;
                         testButton.textContent = '💡 Test';
+                        ipcRenderer.send('color-test-status', isTestingColor);
                         clearInterval(watchdogInterval);
                     }
                 }, 3000);
@@ -772,10 +815,11 @@ function loadColors() {
 }
 
 async function restorePreviousLightState() {
-    if (!previousStateCache || !fs.existsSync(configPath)) return;
+    if (!previousStateCache || !fs.existsSync(getConfigPath())) return;
 
-    const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    const config = JSON.parse(fs.readFileSync(getConfigPath(), 'utf-8'));
     const ids = config.LIGHT_ID.split(',').map(id => id.trim());
+    ipcRenderer.send('set-light-ids', ids);
     const hueAPI = `http://${config.BRIDGE_IP}/api/${config.API_KEY}`;
 
     for (const id of ids) {
@@ -826,12 +870,6 @@ document.getElementById('saveColors').addEventListener('click', () => {
             return;
         }
 
-        if (key === 'enabled') {
-            if (!newColors[name]) newColors[name] = {};
-            newColors[name][key] = input.checked;
-            return;
-        }
-
         switch (key) {
             case 'x':
                 newColors[name].x = parseFloat(input.value) || 0.5;
@@ -854,12 +892,12 @@ document.getElementById('saveColors').addEventListener('click', () => {
         sanitizeColorObject(newColors[name]);
     }
 
-    const existing = fs.existsSync(colorsPath)
-        ? JSON.parse(fs.readFileSync(colorsPath, 'utf-8'))
+    const existing = fs.existsSync(getColorsPath())
+        ? JSON.parse(fs.readFileSync(getColorsPath(), 'utf-8'))
         : {};
 
     const merged = { ...existing, ...newColors };
-    fs.writeFileSync(colorsPath, JSON.stringify(merged, null, 4));
+    fs.writeFileSync(getColorsPath(), JSON.stringify(merged, null, 4));
     info("✅ Saved and sanitized colors.json");
 
     // Reload Color Settings
@@ -867,7 +905,7 @@ document.getElementById('saveColors').addEventListener('click', () => {
 });
 
 function loadBombSettings() {
-    const colors = JSON.parse(fs.readFileSync(colorsPath, 'utf-8'));
+    const colors = JSON.parse(fs.readFileSync(getColorsPath(), 'utf-8'));
     const bomb = colors.bomb;
     const stages = bomb?.stages || {};
     const container = document.getElementById('bombStagesGrid');
@@ -961,9 +999,9 @@ function loadBombSettings() {
 }
 
 document.getElementById('saveBombSettings').addEventListener('click', () => {
-    if (!fs.existsSync(colorsPath)) return;
+    if (!fs.existsSync(getColorsPath())) return;
 
-    const colors = JSON.parse(fs.readFileSync(colorsPath, 'utf-8'));
+    const colors = JSON.parse(fs.readFileSync(getColorsPath(), 'utf-8'));
     if (!colors.bomb) colors.bomb = {};
     if (!colors.bomb.stages) colors.bomb.stages = {};
 
@@ -995,7 +1033,7 @@ document.getElementById('saveBombSettings').addEventListener('click', () => {
     // 💾 Save new stages
     colors.bomb.stages = newStages;
 
-    fs.writeFileSync(colorsPath, JSON.stringify(colors, null, 4));
+    fs.writeFileSync(getColorsPath(), JSON.stringify(colors, null, 4));
     info("✅ Bomb stages and settings saved to colors.json");
 
     // Reload Bomb Settings
@@ -1003,7 +1041,13 @@ document.getElementById('saveBombSettings').addEventListener('click', () => {
 });
 
 function reloadSettings() {
-    const savedConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    const savedConfig = JSON.parse(fs.readFileSync(getConfigPath(), 'utf-8'));
+
+    // Set light IDs from config
+    lightIDs = savedConfig.LIGHT_ID.split(',').map(id => id.trim());
+    lightIDsReady = true;
+    ipcRenderer.send('set-light-ids', lightIDs);
+
     document.getElementById('bridgeIP').value = savedConfig.BRIDGE_IP || '';
     document.getElementById('apiKey').value = savedConfig.API_KEY || '';
     document.getElementById('serverHost').value = savedConfig.SERVER_HOST || '127.0.0.1';
@@ -1020,6 +1064,7 @@ function reloadSettings() {
     }
     loadColors();
     loadBombSettings();
+    ipcRenderer.send('set-hue-api', `http://${config.BRIDGE_IP}/api/${config.API_KEY}`);
     info("✅ Reload completed.")
 }
 
@@ -1037,36 +1082,29 @@ function updateLogButtonVisibility() {
 async function setupPaths(defaultConfigPathArg, defaultColorsPathArg) {
     const isPackaged = await ipcRenderer.invoke('get-is-packaged');
 
+    let basePath;
     if (isPackaged) {
-        const userDataPath = await ipcRenderer.invoke('get-user-data-path');
-        configPath = path.join(userDataPath, 'config.json');
-        colorsPath = path.join(userDataPath, 'colors.json');
-
+        basePath = await ipcRenderer.invoke('get-user-data-path');
         debug("📦 Packaged mode: using userData directory");
-
-        if (!fs.existsSync(configPath)) {
-            fs.copyFileSync(defaultConfigPathArg, configPath);
-            info("✅ Copied default config.json to user data directory");
-        }
-
-        if (!fs.existsSync(colorsPath)) {
-            fs.copyFileSync(defaultColorsPathArg, colorsPath);
-            info("✅ Copied default colors.json to user data directory");
-        }
-
-        setBasePath(userDataPath);
-
     } else {
-        configPath = defaultConfigPathArg;
-        colorsPath = defaultColorsPathArg;
-
+        basePath = path.dirname(defaultConfigPathArg);
         debug("🛠️ Dev mode: using local config/colors in project folder");
-
-        setBasePath(path.dirname(configPath));
     }
 
-    debug("📁 ConfigPath: " + configPath);
-    debug("📁 ColorsPath: " + colorsPath);
+    setBasePath(basePath);
+
+    if (!fs.existsSync(getConfigPath())) {
+        fs.copyFileSync(defaultConfigPathArg, getConfigPath());
+        info("✅ Copied default config.json to user data directory");
+    }
+
+    if (!fs.existsSync(getColorsPath())) {
+        fs.copyFileSync(defaultColorsPathArg, getColorsPath());
+        info("✅ Copied default colors.json to user data directory");
+    }
+
+    debug("📁 ConfigPath: " + getConfigPath());
+    debug("📁 ColorsPath: " + getColorsPath());
 
     loadColors();
     loadBombSettings();

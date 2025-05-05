@@ -1,17 +1,15 @@
-const { info, warn, error, debug, getFullSessionHtml, clearSessionLog, initializeLogger } = require('./logger');
+const { getConfigPath, getColorsPath, getPreviousStatePath, getGamestatePath } = require('./paths');
+const { info, warn, error, debug, getFullSessionHtml, clearSessionLog } = require('./logger');
+
 const path = require('path');
 const fsPromises = require('fs').promises;
-
-let basePath = __dirname;
-let previousStatePath;
-let gamestatePath;
 
 const http = require('http');
 const fs = require('fs');
 
 let config;
 let colors;
-let lightIDs;
+let lightIDs = [];
 let hueAPI;
 let isTimerEnabled;
 
@@ -58,8 +56,8 @@ function sanitizeColorObject(obj) {
 }
 
 async function loadConfig() {
-    const configPath = path.join(basePath, 'config.json');
-    const colorsFilePath = path.join(basePath, 'colors.json');
+    const configPath = getConfigPath();
+    const colorsFilePath = getColorsPath();
 
     if (!fs.existsSync(configPath)) {
         throw new Error("config.json is missing in user data path");
@@ -72,6 +70,15 @@ async function loadConfig() {
     config = JSON.parse(await fsPromises.readFile(configPath, 'utf-8'));
     colors = JSON.parse(await fsPromises.readFile(colorsFilePath, 'utf-8'));
 
+    try {
+        // Initialize lightIDs here from config.json
+        lightIDs = config.LIGHT_ID.split(',').map(id => id.trim());
+    } catch (err) {
+        error(`❌ Failed to get Light IDs from config: ${err.message}`);
+        return;
+    }
+
+    // Sanitize colors
     for (const name in colors) {
         const color = colors[name];
 
@@ -82,8 +89,8 @@ async function loadConfig() {
         }
     }
 
-    hueAPI = `http://${config.BRIDGE_IP}/api/${config.API_KEY}`;
-    lightIDs = config.LIGHT_ID.split(',').map(id => id.trim());
+    // Initialize other config properties
+    setHueAPI(`http://${config.BRIDGE_IP}/api/${config.API_KEY}`);
     isTimerEnabled = config.SHOW_BOMB_TIMER;
 }
 
@@ -97,16 +104,35 @@ async function getLightData(light) {
         const body = await response.json();
         return body.state;
     } catch (error) {
-        console.error(error);
+        error(error);
     }
 }
 
-function updateLightData(light, body) {
-    fetch(`${hueAPI}/lights/${light}/state`, {
-        method: "PUT",
-        body: JSON.stringify(body),
-        headers: { "Content-Type": "application/json" }
-    }).catch(console.error);
+async function updateLightData(light, body) {
+    if (!hueAPI) {
+        error("❌ hueAPI is undefined — cannot update light");
+        return false;
+    }
+
+    try {
+        const res = await fetch(`${hueAPI}/lights/${light}/state`, {
+            method: "PUT",
+            body: JSON.stringify(body),
+            headers: { "Content-Type": "application/json" }
+        });
+
+        if (!res.ok) {
+            throw new Error(`Light ${light} update failed with HTTP ${res.status}`);
+        }
+
+        debug(`✅ Light ${light} updated: ${JSON.stringify(body)}`);
+        debug(`🔌 Shutdown Light ${light} - update attempted: ${JSON.stringify(body)}`);
+
+        return true;
+    } catch (err) {
+        error(`UpdateLightData failed for light ${light}: ${err.message}`);
+        return false;
+    }
 }
 
 function changeBrightness(light, value) {
@@ -444,19 +470,51 @@ async function startScript() {
         return;
     }
 
-    if (!gamestatePath || !previousStatePath) {
-        error("❌ Base path not set. Please call setBasePath() before starting the script.");
+    if (!getGamestatePath() || !getPreviousStatePath()) {
+        error("❌ Paths not initialized. Please call setBasePath() before starting the script.");
         return;
     }
 
     try {
-        await loadConfig(); // ⬅ await it
+        await loadConfig();
     } catch (err) {
         error(`❌ Failed to load config: ${err.message}`);
         return;
     }
 
-    info("🎯 Connecting...");
+    if (!lightIDs || lightIDs.length === 0) {
+        warn("⚠️ No light IDs set. Please ensure light IDs are initialized.");
+        return;
+    }
+
+    info("🎯 Connecting to Hue Bridge...");
+    // Quick check for IP reachability
+    try {
+        await fetchWithTimeout(`http://${config.BRIDGE_IP}`, { method: 'HEAD' }, 1000);
+    } catch (err) {
+        error(`❌ Could not reach Hue Bridge at ${config.BRIDGE_IP}`);
+        error(`🛜 Network error: ${err.message}`);
+        error(`💡 Please check your config entries for correct BRIDGE_IP and ensure your firewall isn't blocking local connections.`);
+        return;
+    }
+
+    // Check API key & lights access
+    try {
+        const res = await fetchWithTimeout(`${hueAPI}/lights`, {}, 2000);
+        if (!res.ok) {
+            throw new Error(`Bridge returned HTTP ${res.status}`);
+        }
+
+        const lights = await res.json();
+        if (!lights || typeof lights !== 'object') {
+            throw new Error('Unexpected response format from /lights');
+        }
+    } catch (err) {
+        error(`❌ Failed to query Hue Bridge API — check your API key or IP`);
+        error(`🔎 Details: ${err.message}`);
+        error(`💡 Please ensure your API_KEY in config.json is valid. You can regenerate it via the Hue Developer CLI or bridge debug tools.`);
+        return;
+    }
 
     // Check sync mode BEFORE starting server
     const inSync = await anyLightInSyncMode();
@@ -585,7 +643,7 @@ async function startScript() {
                 isWritingGameState = true;
                 try {
                     JSON.parse(body);
-                    fs.writeFile(gamestatePath, body, err => {
+                    fs.writeFile(getGamestatePath(), body, err => {
                         if (err) {
                             console.error("Error writing gamestate:", err);
                         }
@@ -638,7 +696,7 @@ async function startScript() {
             stateToSave[id] = states[i];
         });
 
-        fs.writeFileSync(previousStatePath, JSON.stringify(stateToSave, null, 4));
+        fs.writeFileSync(getPreviousStatePath(), JSON.stringify(stateToSave, null, 4));
         info("📦 Saved previous light states");
     } catch (err) {
         error(`❌ Failed to get or save light state: ${err.message}`);
@@ -665,12 +723,13 @@ async function pollLoop() {
 }
 
 async function handlePoll() {
+    // 🔒 Skip poll until write finishes
     if (isWritingGameState) {
-        return; // 🔒 Skip poll until write finishes
+        return;
     }
 
     try {
-        const body = fs.readFileSync(gamestatePath);
+        const body = fs.readFileSync(getGamestatePath());
         gameState = JSON.parse(body);
         if (gamestateHadError) {
             info("✅ gamestate.txt is readable again, resuming normal operation.");
@@ -702,7 +761,7 @@ async function handlePoll() {
         setTimeout(() => {
             if (isWritingGameState) return;
             try {
-                const retryBody = fs.readFileSync(gamestatePath);
+                const retryBody = fs.readFileSync(getGamestatePath());
                 gameState = JSON.parse(retryBody);
             } catch (retryErr) {
                 const retryNow = Date.now();
@@ -961,19 +1020,33 @@ async function fadeOutLight(light, duration = 1000, steps = 10) {
     });
 }
 
-function stopScript() {
+async function stopScript(apiFromMain = null) {
+    debug("🏃 stopScript is running");
     if (!isRunning) {
         info("⚠️ Script is not running.");
         return;
     }
 
+    if (!hueAPI && apiFromMain) {
+        hueAPI = apiFromMain;
+        info(`[MAIN->LOGIC] hueAPI injected from main process: ${hueAPI}`);
+    }
+    
+    if (!hueAPI) {
+        error("❌ hueAPI is undefined and no fallback was provided.");
+        return;
+    }
+
     isRunning = false;
-    info("🛑 Stopping script...");
+    debug("🛑 Stopping script...");
 
     if (server) {
-        server.close(() => {
-            info("🔌 Server closed");
-            server = null;
+        await new Promise((resolve) => {
+            server.close(() => {
+                info("🔌 Server closed");
+                server = null;
+                resolve();
+            });
         });
     }
 
@@ -987,41 +1060,54 @@ function stopScript() {
     }
 
     // 🧠 Restore previous light state or turn lights off
-    if (fs.existsSync(previousStatePath)) {
+    if (fs.existsSync(getPreviousStatePath())) {
         try {
-            const previousStates = JSON.parse(fs.readFileSync(previousStatePath, 'utf-8'));
+            debug("📂 PreviousStatePath exists");
+            const previousStates = JSON.parse(fs.readFileSync(getPreviousStatePath(), 'utf-8'));
 
-            forEachLight(light => {
+            debug(`🔁 Starting to restore ${lightIDs.length} lights...`);
+            for (const light of lightIDs) {
                 const prev = previousStates[light];
-                if (prev) {
-                    const body = {
-                        on: prev.on,
-                        bri: prev.bri,
-                    };
-                    if (Array.isArray(prev.xy)) body.xy = prev.xy;
-                    if (typeof prev.ct === 'number') body.ct = prev.ct;
-
-                    updateLightData(light, body);
+                if (!prev) {
+                    warn(`⚠️ No previous state found for light ${light}`);
+                    continue;
                 }
-            });
-
-            fs.unlinkSync(previousStatePath);
-            info("🔁 Restored previous light states");
-
+            
+                const body = {
+                    on: prev.on,
+                    bri: prev.bri,
+                };
+            
+                if (Array.isArray(prev.xy)) body.xy = prev.xy;
+                if (typeof prev.ct === 'number') body.ct = prev.ct;
+            
+                debug(`🔋 Restored Light ${light}: ${JSON.stringify(body)}`);
+                const success = await updateLightData(light, body);
+                if (!success) {
+                    warn(`⚠️ Failed to restore state for light ${light}`);
+                }
+            }
+            setTimeout(() => {
+                fs.unlinkSync(getPreviousStatePath());
+                info("🔁 Restored previous light states");
+            }, 500)
         } catch (err) {
             warn(`⚠️ Failed to restore previous states: ${err.message}`);
-            forEachLight(light => updateLightData(light, { on: false }));
+            await Promise.all(lightIDs.map(light =>
+                updateLightData(light, { on: false })
+            ));
             warn("🔌 Turned off lights as fallback");
         }
     } else {
-        forEachLight(light => updateLightData(light, { on: false }));
+        await Promise.all(lightIDs.map(light =>
+            updateLightData(light, { on: false })
+        ));
         info("🔌 Turned off lights (no previous state)");
     }
 
-    // Resetting variables
     resetInternalFlags();
 
-    info("🛑 Script stopped");
+    debug("🛑 Script stopped");
 }
 
 function resetInternalFlags() {
@@ -1049,6 +1135,12 @@ function resetInternalFlags() {
 }
 
 const anyLightInSyncMode = async () => {
+    if (!lightIDs || lightIDs.length === 0) {
+        console.warn("⚠️ lightIDs not ready yet.");
+        return false; // Exit early if lightIDs are not ready
+    }
+
+    // Proceed with the logic if lightIDs are ready
     for (const id of lightIDs) {
         try {
             const res = await fetch(`${hueAPI}/lights/${id}`);
@@ -1064,29 +1156,54 @@ const anyLightInSyncMode = async () => {
     return false;
 };
 
-async function setBasePath(path) {
-    basePath = path;
-    initializePaths();
+function fetchWithTimeout(resource, options = {}, timeout = 3000) {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+            reject(new Error("Timeout connecting to Hue Bridge"));
+        }, timeout);
 
-    try {
-        await initializeLogger();
-        debug(`📁 Using basePath: ${basePath}`);
-        debug(`📝 Gamestate path: ${gamestatePath}`);
-        debug(`🧠 Previous state path: ${previousStatePath}`);
-    } catch (err) {
-        console.log("[ERROR] ❌ Failed to initialize logger:", err.message);
+        fetch(resource, options)
+            .then(response => {
+                clearTimeout(timer);
+                resolve(response);
+            })
+            .catch(err => {
+                clearTimeout(timer);
+                reject(err);
+            });
+    });
+}
+
+function setLightIDs(ids) {
+    lightIDs = ids;
+}
+
+function setHueAPI(url) {
+    debug(`[SET] hueAPI assigned to: ${url}`);
+    hueAPI = url;
+
+    // Only send IPC if running in renderer
+    if (typeof window !== 'undefined' && window?.process?.type === 'renderer') {
+        try {
+            const { ipcRenderer } = require('electron');
+            ipcRenderer.send('set-hue-api', url);
+        } catch (err) {
+            warn("⚠️ Failed to send hueAPI to main via IPC:", err.message);
+        }
     }
 }
 
-function initializePaths() {
-    previousStatePath = path.join(basePath, 'previousState.json');
-    gamestatePath = path.join(basePath, 'gamestate.txt');
+function getHueAPI() {
+    return hueAPI;
 }
 
 module.exports = {
     startScript,
     stopScript,
     isScriptRunning: () => isRunning,
+    setIsRunning: (status) => { isRunning = status; },
+    setLightIDs,
+    setHueAPI,
+    getHueAPI,
     anyLightInSyncMode,
-    setBasePath
 };

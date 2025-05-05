@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { ipcRenderer } = require('electron');
+const { getLogPath } = require('./paths');
 
 let HTML_LOG_ENABLED = true;
 let DEBUG_ENABLED = false;
@@ -10,17 +10,29 @@ let MAX_SESSION_LINES = 1000;
 let logBasePath = null;
 const pendingLogs = [];
 
-async function initializeLogger() {
+function initializeLogger() {
     try {
-        logBasePath = await ipcRenderer.invoke('get-log-path');
+        logBasePath = getLogPath();
+        if (!logBasePath) throw new Error("logPath is undefined");
+        if (!fs.existsSync(logBasePath)) {
+            fs.mkdirSync(logBasePath, { recursive: true });
+        }
         debug("📁 Using logBasePath: " + logBasePath);
     } catch (err) {
-        console.warn('⚠️ Failed to get log path from main process:', err.message);
+        console.warn('⚠️ Failed to initialize log path:', err.message);
         logBasePath = path.join(__dirname, 'logs');
+        if (!fs.existsSync(logBasePath)) {
+            fs.mkdirSync(logBasePath, { recursive: true });
+        }
     }
 }
 
-const logCss = fs.readFileSync(path.join(__dirname, 'css', 'log-style.css'), 'utf-8');
+let logCss = '';
+try {
+    logCss = fs.readFileSync(path.join(__dirname, 'css', 'log-style.css'), 'utf-8');
+} catch (err) {
+    warn('⚠️ Failed to read log-style.css:', err.message);
+}
 
 function getFormattedTimestamp() {
     const now = new Date();
@@ -38,13 +50,7 @@ function setHtmlLogEnabled(value) {
         const now = new Date();
         const pad = n => String(n).padStart(2, '0');
         const filenameDate = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-        const dirPath = logBasePath;
-        const filePath = path.join(dirPath, `${filenameDate}-log.html`);
-
-        if (!fs.existsSync(dirPath)) {
-            fs.mkdirSync(dirPath, { recursive: true });
-        }
-
+        const filePath = path.join(logBasePath, `${filenameDate}-log.html`);
         const body = sessionLogLines.join('\n');
         const fullHtml = renderHtmlPage(filenameDate, body, false, true, true);
 
@@ -72,21 +78,39 @@ function createLog(level, ...args) {
         renderLogFunction(message);
     } else {
         pendingLogs.push(message);
-    }    
+    }
 
     appendToHtmlLog(message);
 }
 
 function info(...args) {
-    createLog('INFO', ...args);
+    const processed = args.map(arg => {
+        if (arg instanceof Error) {
+            return arg.stack || arg.message;
+        }
+        return typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg);
+    });
+    createLog('INFO', ...processed);
 }
 
 function warn(...args) {
-    createLog('WARN', ...args);
+    const processed = args.map(arg => {
+        if (arg instanceof Error) {
+            return arg.stack || arg.message;
+        }
+        return typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg);
+    });
+    createLog('WARN', ...processed);
 }
 
 function error(...args) {
-    createLog('ERROR', ...args);
+    const processed = args.map(arg => {
+        if (arg instanceof Error) {
+            return arg.stack || arg.message;
+        }
+        return typeof arg === 'object' ? JSON.stringify(arg) : String(arg);
+    });
+    createLog('ERROR', ...processed);
 }
 
 function debug(...args) {
@@ -100,8 +124,7 @@ function appendToHtmlLog(rawMessage) {
     const now = new Date();
     const pad = n => String(n).padStart(2, '0');
     const filenameDate = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-    const dirPath = logBasePath;
-    const filePath = path.join(dirPath, `${filenameDate}-log.html`);
+    const filePath = path.join(logBasePath, `${filenameDate}-log.html`);
 
     const match = rawMessage.match(/^\[(\w+)] (\d{2}\.\d{2}\.\d{4} - \d{2}:\d{2}:\d{2}) \| (.+)$/);
     const level = match?.[1] ?? 'INFO';
@@ -129,10 +152,6 @@ function appendToHtmlLog(rawMessage) {
     }
 
     if (!HTML_LOG_ENABLED) return;
-
-    if (!fs.existsSync(dirPath)) {
-        fs.mkdirSync(dirPath, { recursive: true });
-    }
 
     const body = sessionLogLines.join('\n');
     const fullHtml = renderHtmlPage(filenameDate, body, false, true, true);
