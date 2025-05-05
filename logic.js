@@ -45,6 +45,7 @@ let explodedHandled = false;
 let hasLoggedBombReset = false;
 let pollerActive = false;
 let isWritingGameState = false;
+let suppressDefaultColor = false;
 
 function sanitizeColorObject(obj) {
     for (const key in obj) {
@@ -400,11 +401,18 @@ async function bombDefused() {
 }
 
 function setDefaultColor() {
+    if (!isRunning) {
+        debug("🛑 Skipping default color — script is not running.");
+        return;
+    }
+    if (suppressDefaultColor) {
+        debug("⏸️ Default color temporarily suppressed");
+        return;
+    }
     if (isBombPlanted || isFading || isBlinking) {
         info("⛔ Default color suppressed — bomb or effect is active");
         return;
     }
-
     if (lastColorMode && lastColorMode !== 'default') {
         info("ℹ️ Skipping default color — already using mode: " + lastColorMode);
         return;
@@ -522,8 +530,6 @@ async function startScript() {
         info("🚫 One or more lights are in sync/entertainment mode.");
         return;
     }
-
-    isRunning = true;
 
     const host = config.SERVER_HOST || '127.0.0.1';
     const port = config.SERVER_PORT || 8080;
@@ -712,6 +718,9 @@ async function startScript() {
             setDefaultColor();
         }
     }, 1000);
+
+    isRunning = true;
+    return true;
 }
 
 async function pollLoop() {
@@ -1087,10 +1096,14 @@ async function stopScript(apiFromMain = null) {
                     warn(`⚠️ Failed to restore state for light ${light}`);
                 }
             }
+            suppressDefaultColor = true;
             setTimeout(() => {
                 fs.unlinkSync(getPreviousStatePath());
                 info("🔁 Restored previous light states");
-            }, 500)
+                
+                // Allow default color again after a short grace period
+                setTimeout(() => suppressDefaultColor = false, 3000);
+            }, 500);
         } catch (err) {
             warn(`⚠️ Failed to restore previous states: ${err.message}`);
             await Promise.all(lightIDs.map(light =>

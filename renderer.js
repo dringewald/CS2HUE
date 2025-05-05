@@ -7,6 +7,8 @@ const path = require('path');
 let scriptIsRunning = false;
 let lightIDs = [];
 let lightIDsReady = false;
+let scriptIsStarting = false;
+let scriptIsStopping = false;
 
 ipcRenderer.on('set-light-ids', (event, ids) => {
     lightIDs = ids;
@@ -183,42 +185,96 @@ function initializeApp() {
             warn("🚫 Cannot start script while color test is active.");
             return;
         }
+    
+        if (scriptIsRunning) {
+            warn("⚠️ Script already running..");
+            return;
+        }
+    
+        if (scriptIsStarting) {
+            warn("⚠️ Script is currently starting.");
+            return;
+        }
+    
+        scriptIsStarting = true;
+        setScriptControlsEnabled(false); // 🔒 Disable buttons
+    
         info("▶️ Starting bomb script...");
-        await startScript();
-        scriptIsRunning = true;
-        ipcRenderer.send('set-script-running', true);
+        const success = await startScript();
+    
+        scriptIsStarting = false;
+        scriptIsRunning = !!success;
+        ipcRenderer.send('set-script-running', scriptIsRunning);
         updateLogButtonVisibility();
+        setScriptControlsEnabled(true); // 🔓 Enable buttons
+    
+        if (!success) {
+            warn("❌ Script failed to start.");
+        }
     });
 
-    document.getElementById('stopScript').addEventListener('click', () => {
+    document.getElementById('stopScript').addEventListener('click', async () => {
+        if (scriptIsStarting) {
+            warn("⚠️ Script is still starting. Please wait...");
+            return;
+        }
+    
+        if (!scriptIsRunning) {
+            warn("⚠️ Script is not currently running.");
+            return;
+        }
+    
+        if (scriptIsStopping) {
+            warn("⏳ Script is already stopping...");
+            return;
+        }
+    
+        scriptIsStopping = true;
+        setScriptControlsEnabled(false); // 🔒 Disable buttons
         info("🛑 Stopping script...");
-        stopScript(getHueAPI());
+    
+        await stopScript(getHueAPI());
+    
         scriptIsRunning = false;
+        scriptIsStopping = false;
         ipcRenderer.send('set-script-running', false);
         updateLogButtonVisibility();
-        info("✅ Script stopped!")
-    });
+        setScriptControlsEnabled(true); // 🔓 Enable buttons
+        info("✅ Script stopped!");
+    });    
 
     document.getElementById('reloadConfig').addEventListener('click', () => {
         info("🔁 Reloading Settings...");
         reloadSettings();
     });
 
-    document.getElementById('restartScript').addEventListener('click', () => {
+    document.getElementById('restartScript').addEventListener('click', async () => {
         if (isTestingColor) {
             warn("🚫 Cannot restart script while color test is active.");
             return;
         }
+        if (scriptIsStarting || scriptIsStopping) {
+            warn("⚠️ Script is busy. Please wait...");
+            return;
+        }
+    
+        setScriptControlsEnabled(false);
         info("🔁 Restarting Script...");
-        reloadSettings();
-        stopScript(getHueAPI());
+    
+        scriptIsStopping = true;
+        await stopScript(getHueAPI());
         scriptIsRunning = false;
-        ipcRenderer.send('set-script-running', false);
-        startScript();
-        scriptIsRunning = true;
-        ipcRenderer.send('set-script-running', true);
+        scriptIsStopping = false;
+    
+        scriptIsStarting = true;
+        const success = await startScript();
+        scriptIsRunning = !!success;
+        scriptIsStarting = false;
+    
+        ipcRenderer.send('set-script-running', scriptIsRunning);
         updateLogButtonVisibility();
-    });
+        setScriptControlsEnabled(true);
+    });    
 
     document.getElementById('openLogBtn').addEventListener('click', () => {
         const serverHost = document.getElementById('serverHost').value || '127.0.0.1';
@@ -1108,4 +1164,14 @@ async function setupPaths(defaultConfigPathArg, defaultColorsPathArg) {
 
     loadColors();
     loadBombSettings();
+}
+
+function setScriptControlsEnabled(enabled) {
+    const startBtn = document.getElementById('startScript');
+    const stopBtn = document.getElementById('stopScript');
+    const restartBtn = document.getElementById('restartScript');
+
+    if (startBtn) startBtn.disabled = !enabled;
+    if (stopBtn) stopBtn.disabled = !enabled;
+    if (restartBtn) restartBtn.disabled = !enabled;
 }

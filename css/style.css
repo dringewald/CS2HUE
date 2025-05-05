@@ -68,6 +68,11 @@ button:hover {
     background: #ffd633;
 }
 
+button:disabled {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
 h3 {
     margin-top: 0;
     color: #ffa500;
