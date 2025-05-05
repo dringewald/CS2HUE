@@ -60,11 +60,11 @@ window.addEventListener('DOMContentLoaded', async () => {
     const isPackaged = await ipcRenderer.invoke('get-is-packaged');
 
     const defaultConfigPath = isPackaged
-        ? path.join(process.resourcesPath, 'config.json')
+        ? path.join(__dirname, 'config.json')
         : path.join(__dirname, 'config.json');
 
     const defaultColorsPath = isPackaged
-        ? path.join(process.resourcesPath, 'colors.json')
+        ? path.join(__dirname, 'colors.json')
         : path.join(__dirname, 'colors.json');
 
     await setupPaths(defaultConfigPath, defaultColorsPath);
@@ -131,7 +131,7 @@ function initializeApp() {
             debug('debugMode field value:', document.getElementById('debugMode').value);
             document.getElementById('liveLogNumber').value = config.LIVE_LOG_LINES || 1000;
             debug('liveLogNumber field value:', document.getElementById('liveLogNumber').value);
-            
+
             info("🔧 Loaded config.json");
         } catch (err) {
             error(`❌ Failed to parse config.json: ${err.message}`);
@@ -180,34 +180,34 @@ function initializeApp() {
             warn("⚠️ lightIDs not ready, cannot start script.");
             return;
         }
-    
+
         if (isTestingColor) {
             warn("🚫 Cannot start script while color test is active.");
             return;
         }
-    
+
         if (scriptIsRunning) {
             warn("⚠️ Script already running..");
             return;
         }
-    
+
         if (scriptIsStarting) {
             warn("⚠️ Script is currently starting.");
             return;
         }
-    
+
         scriptIsStarting = true;
         setScriptControlsEnabled(false); // 🔒 Disable buttons
-    
+
         info("▶️ Starting bomb script...");
         const success = await startScript();
-    
+
         scriptIsStarting = false;
         scriptIsRunning = !!success;
         ipcRenderer.send('set-script-running', scriptIsRunning);
         updateLogButtonVisibility();
         setScriptControlsEnabled(true); // 🔓 Enable buttons
-    
+
         if (!success) {
             warn("❌ Script failed to start.");
         }
@@ -218,30 +218,30 @@ function initializeApp() {
             warn("⚠️ Script is still starting. Please wait...");
             return;
         }
-    
+
         if (!scriptIsRunning) {
             warn("⚠️ Script is not currently running.");
             return;
         }
-    
+
         if (scriptIsStopping) {
             warn("⏳ Script is already stopping...");
             return;
         }
-    
+
         scriptIsStopping = true;
         setScriptControlsEnabled(false); // 🔒 Disable buttons
         info("🛑 Stopping script...");
-    
+
         await stopScript(getHueAPI());
-    
+
         scriptIsRunning = false;
         scriptIsStopping = false;
         ipcRenderer.send('set-script-running', false);
         updateLogButtonVisibility();
         setScriptControlsEnabled(true); // 🔓 Enable buttons
         info("✅ Script stopped!");
-    });    
+    });
 
     document.getElementById('reloadConfig').addEventListener('click', () => {
         info("🔁 Reloading Settings...");
@@ -257,24 +257,24 @@ function initializeApp() {
             warn("⚠️ Script is busy. Please wait...");
             return;
         }
-    
+
         setScriptControlsEnabled(false);
         info("🔁 Restarting Script...");
-    
+
         scriptIsStopping = true;
         await stopScript(getHueAPI());
         scriptIsRunning = false;
         scriptIsStopping = false;
-    
+
         scriptIsStarting = true;
         const success = await startScript();
         scriptIsRunning = !!success;
         scriptIsStarting = false;
-    
+
         ipcRenderer.send('set-script-running', scriptIsRunning);
         updateLogButtonVisibility();
         setScriptControlsEnabled(true);
-    });    
+    });
 
     document.getElementById('openLogBtn').addEventListener('click', () => {
         const serverHost = document.getElementById('serverHost').value || '127.0.0.1';
@@ -1135,28 +1135,32 @@ function updateLogButtonVisibility() {
     openDocBtn.style.display = scriptIsRunning ? 'inline-block' : 'none';
 }
 
-async function setupPaths(defaultConfigPathArg, defaultColorsPathArg) {
+async function setupPaths() {
     const isPackaged = await ipcRenderer.invoke('get-is-packaged');
-
     let basePath;
+
     if (isPackaged) {
         basePath = await ipcRenderer.invoke('get-user-data-path');
-        debug("📦 Packaged mode: using userData directory");
+        setBasePath(basePath);
+
+        const defaultConfigPath = path.join(__dirname, 'config.json');
+        const defaultColorsPath = path.join(__dirname, 'colors.json');
+
+        if (!fs.existsSync(getConfigPath())) {
+            const contents = fs.readFileSync(defaultConfigPath, 'utf-8');
+            fs.writeFileSync(getConfigPath(), contents);
+            info("✅ Copied default config.json to user path");
+        }
+
+        if (!fs.existsSync(getColorsPath())) {
+            const contents = fs.readFileSync(defaultColorsPath, 'utf-8');
+            fs.writeFileSync(getColorsPath(), contents);
+            info("✅ Copied default colors.json to user path");
+        }
     } else {
-        basePath = path.dirname(defaultConfigPathArg);
-        debug("🛠️ Dev mode: using local config/colors in project folder");
-    }
-
-    setBasePath(basePath);
-
-    if (!fs.existsSync(getConfigPath())) {
-        fs.copyFileSync(defaultConfigPathArg, getConfigPath());
-        info("✅ Copied default config.json to user data directory");
-    }
-
-    if (!fs.existsSync(getColorsPath())) {
-        fs.copyFileSync(defaultColorsPathArg, getColorsPath());
-        info("✅ Copied default colors.json to user data directory");
+        basePath = path.resolve(__dirname); // dev mode
+        setBasePath(basePath);
+        debug("🛠️ Dev mode: using local files only, no copying.");
     }
 
     debug("📁 ConfigPath: " + getConfigPath());

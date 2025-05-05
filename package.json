@@ -30,7 +30,9 @@
       "!previousState.json",
       "!logs/**/*",
       "!node_modules/*/.bin",
-      "!node_modules/.cache/**/*"
+      "!node_modules/.cache/**/*",
+      "config.json",
+      "colors.json"
     ],
     "directories": {
       "buildResources": "build"
