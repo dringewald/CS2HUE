@@ -7,6 +7,7 @@
 [![Created with ChatGPT](https://img.shields.io/badge/Created%20with-ChatGPT-10a37f?logo=openai)](https://openai.com/chatgpt)
 [![Join us on Discord](https://img.shields.io/badge/Discord-Join%20Now-5865F2?logo=discord)](https://discord.gg/jymDumdFVU)
 [![Donate on PayPal](https://img.shields.io/badge/Donate-PayPal-0070ba?logo=paypal)](https://www.paypal.com/paypalme/NoXHolt)
+[![Steam Profile](https://img.shields.io/badge/Steam-View%20Profile-000000?logo=steam)](https://steamcommunity.com/id/nox_holt)
 
 **CS2Hue** is an advanced Electron-based tool that syncs your Philips Hue lights with in-game bomb events in Counter-Strike 2 (CS2).  
 It reacts live to bomb plants, explosions, defuses, round wins/losses, and team changes — **bringing your game to life with dynamic lighting**! 🌈
