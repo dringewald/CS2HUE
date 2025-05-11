@@ -36,9 +36,19 @@ jobs:
       - name: Build app
         run: npm run dist -- --publish=never
 
-      - name: Create setup zip
+      - name: Extract and show version from package.json
+        id: get_version
+        shell: bash
         run: |
-          VERSION="1.0.0"
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Extracted version is: $VERSION"
+
+      - name: Prepare setup package
+        id: prepare
+        shell: bash
+        run: |
+          VERSION="${{ steps.get_version.outputs.version }}"
           OS_SUFFIX=""
           SETUP_FILE=""
 
@@ -53,26 +63,17 @@ jobs:
             SETUP_FILE="cs2hue Setup ${VERSION}.exe"
           fi
 
-          ZIP_NAME="cs2hue.Setup.${OS_SUFFIX}.${VERSION}.zip"
-          mkdir zipdir
+          DIR_NAME="cs2hue.Setup.${OS_SUFFIX}.${VERSION}"
+          echo "dir_name=$DIR_NAME" >> "$GITHUB_OUTPUT"
 
-          cp "dist/$SETUP_FILE" zipdir/
-          cp gamestate_integration_cs2hue.cfg zipdir/
-          cp config.json zipdir/
-          cp colors.json zipdir/
+          mkdir "$DIR_NAME"
+          cp "dist/$SETUP_FILE" "$DIR_NAME/"
+          cp gamestate_integration_cs2hue.cfg "$DIR_NAME/"
+          cp config.json "$DIR_NAME/"
+          cp colors.json "$DIR_NAME/"
 
-          cd zipdir
-          zip -r "../$ZIP_NAME" .
-        shell: bash
-
-      - name: Upload setup zip
+      - name: Upload setup package
         uses: actions/upload-artifact@v4
         with:
-          name: cs2hue-setup-${{ runner.os }}
-          path: cs2hue.Setup.*.zip
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: cs2hue-${{ runner.os }}
-          path: dist/**/*
+          name: ${{ steps.prepare.outputs.dir_name }}
+          path: ${{ steps.prepare.outputs.dir_name }}
