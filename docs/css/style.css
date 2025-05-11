@@ -386,3 +386,12 @@ pre {
 .scroll-top-btn.hidden {
     display: none;
 }
+
+.header-with-button {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin-top: 1rem;
+}

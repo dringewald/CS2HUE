@@ -1,6 +1,7 @@
 const { info, warn, error, debug, setHtmlLogEnabled, setDebugMode, setRendererLogFunction, setMaxSessionLines, initializeLogger } = require('./logger');
 const { startScript, stopScript, isScriptRunning, anyLightInSyncMode, getHueAPI } = require('./logic.js');
-const { setBasePath, getConfigPath, getColorsPath } = require('./paths');
+const { setBasePath, getConfigPath, getColorsPath, getBackupPath } = require('./paths');
+const { migrateMissingColors } = require('./migrator');
 const { ipcRenderer } = require('electron');
 const fs = require('fs');
 const path = require('path');
@@ -68,7 +69,10 @@ window.addEventListener('DOMContentLoaded', async () => {
         : path.join(__dirname, 'colors.json');
 
     await setupPaths(defaultConfigPath, defaultColorsPath);
-    await initializeLogger();
+    initializeLogger();
+
+    // Migrate missing color fields
+    migrateMissingColors();
 
     initializeApp();
 });
@@ -541,7 +545,7 @@ function loadColors() {
         debug(`🔍 ${name}: XY [${color.x}, ${color.y}] @ bri ${bri} → ${hex}`);
 
         const label = document.createElement('strong');
-        label.textContent = name;
+        label.textContent = name.charAt(0).toUpperCase() + name.slice(1);
         wrapper.appendChild(label);
 
         const colorPicker = document.createElement('input');
@@ -729,128 +733,139 @@ function loadColors() {
         });
 
         // Test Button
-        const testButton = document.createElement('button');
-        testButton.textContent = '💡 Test';
-        testButton.className = 'test-color-btn';
-        testButton.dataset.name = name;
-        wrapper.appendChild(testButton);
+        const testSavedButton = document.createElement('button');
+        testSavedButton.textContent = '💾 Test Saved';
+        testSavedButton.className = 'test-color-btn';
+        testSavedButton.dataset.name = name;
+        wrapper.appendChild(testSavedButton);
 
-        testButton.addEventListener('click', async () => {
+        // Test Live View Button
+        const testLiveButton = document.createElement('button');
+        testLiveButton.textContent = '🎨 Test Live';
+        testLiveButton.className = 'test-live-color-btn';
+        testLiveButton.dataset.name = name;
+        wrapper.appendChild(testLiveButton);
+
+        // Shared test function
+        async function handleColorTest(colorSourceFn, button) {
             if (isTestingColor && testedColorName === name) {
-                // 🔁 Stop test
                 await restorePreviousLightState();
                 info(`🔙 Stopped testing "${name}"`);
                 isTestingColor = false;
                 testedColorName = null;
-                testButton.textContent = '💡 Test';
+                testSavedButton.textContent = '💾 Test Saved';
+                testLiveButton.textContent = '🎨 Test Live';
                 ipcRenderer.send('color-test-status', isTestingColor);
-            } else {
-                if (isTestingColor) {
-                    warn(`⚠️ Already testing "${testedColorName}". Stop that first.`);
-                    return;
-                }
-
-                // 🚫 Block if script is running
-                if (isScriptRunning()) {
-                    info("🚫 Cannot test while script is running.");
-                    return;
-                }
-
-                // 🧠 Save current state
-                if (!fs.existsSync(getConfigPath())) return;
-                const config = JSON.parse(fs.readFileSync(getConfigPath(), 'utf-8'));
-                const ids = config.LIGHT_ID.split(',').map(id => id.trim());
-                ipcRenderer.send('set-light-ids', ids);
-
-                const hueAPI = `http://${config.BRIDGE_IP}/api/${config.API_KEY}`;
-                ipcRenderer.send('set-hue-api', `http://${config.BRIDGE_IP}/api/${config.API_KEY}`);
-
-                // 🚫 Block if lights are in sync mode
-                const inSync = await anyLightInSyncMode();
-                if (inSync) {
-                    info("🚫 One or more lights are in sync/entertainment mode.");
-                    return;
-                }
-
-                previousStateCache = {};
-                for (const id of ids) {
-                    try {
-                        const res = await fetch(`${hueAPI}/lights/${id}`);
-                        if (!res.ok) {
-                            throw new Error(`HTTP ${res.status} - ${res.statusText}`);
-                        }
-                        const body = await res.json();
-                        previousStateCache[id] = body.state;
-                    } catch (err) {
-                        error(`❌ Failed to fetch light state for light ${id}: ${err.message}`);
-                        return;
-                    }
-                }
-
-                // 💡 Send test color
-                const color = JSON.parse(fs.readFileSync(getColorsPath(), 'utf-8'))[name];
-                const body = {
-                    on: true,
-                    bri: color.bri ?? 200
-                };
-                if (color.useCt && typeof color.ct === 'number') {
-                    body.ct = color.ct;
-                } else if (typeof color.x === 'number' && typeof color.y === 'number') {
-                    body.xy = [color.x, color.y];
-                }
-
-                for (const id of ids) {
-                    try {
-                        const response = await fetch(`${hueAPI}/lights/${id}/state`, {
-                            method: 'PUT',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(body)
-                        });
-                        if (!response.ok) {
-                            throw new Error(`HTTP ${response.status} - ${response.statusText}`);
-                        }
-                    } catch (err) {
-                        error(`❌ Failed to send test color to light ${id}: ${err.message}`);
-                    }
-                }
-
-                isTestingColor = true;
-                testedColorName = name;
-                testButton.textContent = '⛔ Stop Test';
-                info(`🎯 Testing color "${name}"...`);
-                ipcRenderer.send('color-test-status', isTestingColor);
-
-                let watchdogInterval = setInterval(async () => {
-                    if (!isTestingColor) {
-                        clearInterval(watchdogInterval);
-                        return;
-                    }
-
-                    try {
-                        for (const id of ids) {
-                            const res = await fetch(`${hueAPI}/lights/${id}`);
-                            if (!res.ok) throw new Error(`HTTP ${res.status} - ${res.statusText}`);
-                            const data = await res.json();
-
-                            // Check if light is reachable
-                            if (data.state?.reachable === false) {
-                                throw new Error(`Light ${id} not reachable`);
-                            }
-                        }
-                    } catch (err) {
-                        error(`❌ Lost connection during test: ${err.message}`);
-
-                        // Auto cancel test
-                        await restorePreviousLightState();
-                        isTestingColor = false;
-                        testedColorName = null;
-                        testButton.textContent = '💡 Test';
-                        ipcRenderer.send('color-test-status', isTestingColor);
-                        clearInterval(watchdogInterval);
-                    }
-                }, 3000);
+                return;
             }
-        });
+
+            if (isTestingColor) {
+                warn(`⚠️ Already testing "${testedColorName}". Stop that first.`);
+                return;
+            }
+
+            if (isScriptRunning()) {
+                info("🚫 Cannot test while script is running.");
+                return;
+            }
+
+            if (!fs.existsSync(getConfigPath())) return;
+            const config = JSON.parse(fs.readFileSync(getConfigPath(), 'utf-8'));
+            const ids = config.LIGHT_ID.split(',').map(id => id.trim());
+            const hueAPI = `http://${config.BRIDGE_IP}/api/${config.API_KEY}`;
+
+            ipcRenderer.send('set-light-ids', ids);
+            ipcRenderer.send('set-hue-api', hueAPI);
+
+            const inSync = await anyLightInSyncMode();
+            if (inSync) {
+                info("🚫 One or more lights are in sync/entertainment mode.");
+                return;
+            }
+
+            previousStateCache = {};
+            for (const id of ids) {
+                try {
+                    const res = await fetch(`${hueAPI}/lights/${id}`);
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    const body = await res.json();
+                    previousStateCache[id] = body.state;
+                } catch (err) {
+                    error(`❌ Failed to fetch state for light ${id}: ${err.message}`);
+                    return;
+                }
+            }
+
+            const color = await colorSourceFn();  // Fetch color dynamically
+            const body = { on: true, bri: color.bri ?? 200 };
+
+            if (color.useCt && typeof color.ct === 'number') {
+                body.ct = color.ct;
+            } else if (typeof color.x === 'number' && typeof color.y === 'number') {
+                body.xy = [color.x, color.y];
+            }
+
+            for (const id of ids) {
+                try {
+                    const response = await fetch(`${hueAPI}/lights/${id}/state`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(body)
+                    });
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                } catch (err) {
+                    error(`❌ Failed to set color on light ${id}: ${err.message}`);
+                }
+            }
+
+            isTestingColor = true;
+            testedColorName = name;
+            testSavedButton.textContent = '⛔ Stop Test';
+            testLiveButton.textContent = '⛔ Stop Test';
+            ipcRenderer.send('color-test-status', isTestingColor);
+
+            let watchdogInterval = setInterval(async () => {
+                if (!isTestingColor) {
+                    clearInterval(watchdogInterval);
+                    return;
+                }
+
+                try {
+                    for (const id of ids) {
+                        const res = await fetch(`${hueAPI}/lights/${id}`);
+                        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                        const data = await res.json();
+                        if (data.state?.reachable === false) {
+                            throw new Error(`Light ${id} not reachable`);
+                        }
+                    }
+                } catch (err) {
+                    error(`❌ Lost connection during test: ${err.message}`);
+                    await restorePreviousLightState();
+                    isTestingColor = false;
+                    testedColorName = null;
+                    testSavedButton.textContent = '💾 Test Saved';
+                    testLiveButton.textContent = '🎨 Test Live';
+                    ipcRenderer.send('color-test-status', isTestingColor);
+                    clearInterval(watchdogInterval);
+                }
+            }, 3000);
+        }
+
+        // Button Events
+        testSavedButton.addEventListener('click', () =>
+            handleColorTest(async () => {
+                const colors = JSON.parse(fs.readFileSync(getColorsPath(), 'utf-8'));
+                return colors[name];
+            }, testSavedButton)
+        );
+
+        testLiveButton.addEventListener('click', () =>
+            handleColorTest(async () => {
+                // 🔧 Replace this with live color source (e.g., from UI input fields)
+                return getLiveColor(name); // Example: your own function to fetch from inputs
+            }, testLiveButton)
+        );
 
         enabledWrapper.appendChild(enabledToggleContainer);
         colorsContainer.appendChild(wrapper);
@@ -1163,8 +1178,16 @@ async function setupPaths() {
         debug("🛠️ Dev mode: using local files only, no copying.");
     }
 
+    // ✅ Ensure backups directory exists
+    const backupDir = getBackupPath();
+    if (!fs.existsSync(backupDir)) {
+        fs.mkdirSync(backupDir, { recursive: true });
+        info("📁 Created backups directory at: " + backupDir);
+    }
+
     debug("📁 ConfigPath: " + getConfigPath());
     debug("📁 ColorsPath: " + getColorsPath());
+    debug("📁 BackupPath: " + getBackupPath());
 
     loadColors();
     loadBombSettings();
@@ -1178,4 +1201,34 @@ function setScriptControlsEnabled(enabled) {
     if (startBtn) startBtn.disabled = !enabled;
     if (stopBtn) stopBtn.disabled = !enabled;
     if (restartBtn) restartBtn.disabled = !enabled;
+}
+
+function getLiveColor(name) {
+    const getInput = (key) =>
+        document.querySelector(`input[data-name="${name}"][data-key="${key}"]`);
+
+    const parseFloatOrUndefined = (val) =>
+        val !== '' && !isNaN(val) ? parseFloat(val) : undefined;
+
+    const parseIntOrUndefined = (val) =>
+        val !== '' && !isNaN(val) ? parseInt(val, 10) : undefined;
+
+    const x = parseFloatOrUndefined(getInput('x')?.value);
+    const y = parseFloatOrUndefined(getInput('y')?.value);
+    const bri = parseIntOrUndefined(getInput('bri')?.value);
+    const ct = parseIntOrUndefined(getInput('ct')?.value);
+    const useCt = getInput('useCt')?.checked === true;
+
+    const color = { bri, useCt };
+
+    if (useCt && ct !== undefined) {
+        color.ct = ct;
+    } else if (!useCt && x !== undefined && y !== undefined) {
+        color.x = x;
+        color.y = y;
+    } else {
+        throw new Error(`❌ Invalid inputs for live color "${name}". Missing required fields.`);
+    }
+
+    return color;
 }
