@@ -16,13 +16,16 @@ let isTimerEnabled;
 let server;
 let isRunning = false;
 
+let isFirstPoll = true;
 let gameState = {};
 const HEALTHCHECK_WARN_COOLDOWN = 10000;
 const GAMESTATE_MISSING_WARN_COOLDOWN = 10000;
 const RETRY_FAIL_COOLDOWN = 10000;
+const FIRST_POLL_INFO_COOLDOWN = 10000;
 let lastHealthCheck = Date.now();
 let lastGamestateMissingWarn = 0;
 let lastRetryFailWarn = 0;
+let lastFirstPollLog = 0;
 let gamestateHadError = false;
 
 let isBombPlanted = false;
@@ -744,20 +747,34 @@ async function handlePoll() {
             info("✅ gamestate.txt is readable again, resuming normal operation.");
             gamestateHadError = false;
         }
+
+        if (isFirstPoll) {
+            isFirstPoll = false;
+        }
     } catch (err) {
         const now = Date.now();
 
         // Throttle healthcheck warning
-        if (now - lastHealthCheck > HEALTHCHECK_WARN_COOLDOWN) {
-            warn(`❌ Failed to read or parse gamestate.txt: ${err.message} - Retrying...`);
-            lastHealthCheck = now;
-        } else {
-            debug(`(Suppressed) Failed to read or parse gamestate.txt: ${err.message}`);
+        if (!isFirstPoll) {
+            if (now - lastHealthCheck > HEALTHCHECK_WARN_COOLDOWN) {
+                warn(`❌ Failed to read or parse gamestate.txt: ${err.message} - Retrying...`);
+                lastHealthCheck = now;
+            } else {
+                debug(`(Suppressed) Failed to read or parse gamestate.txt: ${err.message}`);
+            }
         }
 
         // Specific missing file warning (separate cooldown)
         if (err.code === 'ENOENT') {
-            if (now - lastGamestateMissingWarn > GAMESTATE_MISSING_WARN_COOLDOWN) {
+            if (isFirstPoll) {
+                if (now - lastFirstPollLog > FIRST_POLL_INFO_COOLDOWN) {
+                    info("⏳ Waiting for CS2 to create gamestate.txt...");
+                    lastFirstPollLog = now;
+                } else {
+                    debug("(Suppressed) Waiting for gamestate.txt...");
+                }
+            }
+            else if (now - lastGamestateMissingWarn > GAMESTATE_MISSING_WARN_COOLDOWN) {
                 warn(`❌ gamestate.txt missing: ${err.message}. - Retrying...`);
                 warn(`ℹ️ CS2 is not sending data. Please check the gamestate_integration_cs2hue.cfg file. (See: https://github.com/dringewald/CS2HUE#readme)`);
                 lastGamestateMissingWarn = now;
@@ -773,12 +790,14 @@ async function handlePoll() {
                 const retryBody = fs.readFileSync(getGamestatePath());
                 gameState = JSON.parse(retryBody);
             } catch (retryErr) {
-                const retryNow = Date.now();
-                if (retryNow - lastRetryFailWarn > RETRY_FAIL_COOLDOWN) {
-                    error(`❌ Retry failed: ${retryErr.message} - Retrying...`);
-                    lastRetryFailWarn = retryNow;
-                } else {
-                    debug(`(Suppressed) Retry failed: ${retryErr.message}`);
+                if (!isFirstPoll) {
+                    const retryNow = Date.now();
+                    if (retryNow - lastRetryFailWarn > RETRY_FAIL_COOLDOWN) {
+                        error(`❌ Retry failed: ${retryErr.message} - Retrying...`);
+                        lastRetryFailWarn = retryNow;
+                    } else {
+                        debug(`(Suppressed) Retry failed: ${retryErr.message}`);
+                    }
                 }
             }
         }, 100);
@@ -806,10 +825,27 @@ async function handlePoll() {
                 await sendColorToAllLights(colors.menu);
                 lastColorMode = "menu";
             } else {
-                warn("⚠️ No menu color defined in colors.json");
+                warn("⚠️ Menu color is disabled or not defined in colors.json");
             }
         }
 
+        return;
+    }
+
+    // 💡 Warmup phase logic
+    if (gameState.map?.phase === "warmup") {
+        if (lastColorMode !== "warmup") {
+            info("🔥 Warmup phase detected, setting warmup color");
+            resetBombState();
+
+            const warmupColor = colors.warmup;
+            if (warmupColor && warmupColor.enabled !== false) {
+                await sendColorToAllLights(warmupColor);
+                lastColorMode = "warmup";
+            } else {
+                warn("⚠️ Warmup color is disabled or not defined in colors.json");
+            }
+        }
         return;
     }
 
@@ -1040,7 +1076,7 @@ async function stopScript(apiFromMain = null) {
         hueAPI = apiFromMain;
         info(`[MAIN->LOGIC] hueAPI injected from main process: ${hueAPI}`);
     }
-    
+
     if (!hueAPI) {
         error("❌ hueAPI is undefined and no fallback was provided.");
         return;
@@ -1081,15 +1117,15 @@ async function stopScript(apiFromMain = null) {
                     warn(`⚠️ No previous state found for light ${light}`);
                     continue;
                 }
-            
+
                 const body = {
                     on: prev.on,
                     bri: prev.bri,
                 };
-            
+
                 if (Array.isArray(prev.xy)) body.xy = prev.xy;
                 if (typeof prev.ct === 'number') body.ct = prev.ct;
-            
+
                 debug(`🔋 Restored Light ${light}: ${JSON.stringify(body)}`);
                 const success = await updateLightData(light, body);
                 if (!success) {
@@ -1100,7 +1136,7 @@ async function stopScript(apiFromMain = null) {
             setTimeout(() => {
                 fs.unlinkSync(getPreviousStatePath());
                 info("🔁 Restored previous light states");
-                
+
                 // Allow default color again after a short grace period
                 setTimeout(() => suppressDefaultColor = false, 3000);
             }, 500);

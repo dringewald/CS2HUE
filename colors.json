@@ -6,6 +6,13 @@
         "useCt": false,
         "enabled": true
     },
+    "warmup": {
+        "bri": 100,
+        "x": 0.3552,
+        "y": 0.398,
+        "useCt": false,
+        "enabled": true
+    },
     "CT": {
         "bri": 20,
         "x": 0.1553,
@@ -21,39 +28,9 @@
         "enabled": true
     },
     "bomb": {
-        "enabled": true,
+        "bri": 25,
         "x": 0.675,
         "y": 0.322,
-        "bri": 25,
-        "initialTime": 40,
-        "initialBlinkSpeed": 1000,
-        "stages": {
-            "30": {
-                "bri": 20,
-                "speed": 750
-            },
-            "20": {
-                "bri": 35,
-                "speed": 500
-            },
-            "12": {
-                "bri": 50,
-                "speed": 250
-            },
-            "5": {
-                "bri": 100,
-                "speed": 150
-            },
-            "2": {
-                "bri": 150,
-                "speed": 0
-            }
-        }
-    },
-    "default": {
-        "bri": 100,
-        "x": 0.2952,
-        "y": 0.5825,
         "useCt": false,
         "enabled": true
     },
@@ -83,6 +60,13 @@
         "bri": 254,
         "x": 0.6401,
         "y": 0.33,
+        "useCt": false,
+        "enabled": true
+    },
+    "default": {
+        "bri": 100,
+        "x": 0.2952,
+        "y": 0.5825,
         "useCt": false,
         "enabled": true
     }

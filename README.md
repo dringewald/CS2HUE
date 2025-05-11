@@ -169,9 +169,7 @@ When CS2Hue is **installed**, files and logs are placed in OS-specific locations
 | **App Executable**  | `C:\Users\<username>\AppData\Local\Programs\cs2hue\`   | `/Applications/CS2Hue.app`                    | Varies (e.g. `/opt/CS2Hue`, or where AppImage is) |
 | **App Code (asar)** | `resources\app.asar` inside install dir               | `CS2Hue.app/Contents/Resources/app.asar`      | Inside AppImage or extracted folder               |
 
-### 📁 User Data & Config Paths
-
-## 📂 Paths
+### 📂 User Data & Config Paths
 
 CS2Hue stores and loads configuration and logs from the following locations, depending on your OS and whether the app is packaged or running in dev mode:
 

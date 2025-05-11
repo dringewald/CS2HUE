@@ -1,9 +1,12 @@
 {
   "name": "cs2hue",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Control Hue Lights with CS2",
   "main": "main.js",
-  "author": "dringewald",
+  "author": {
+    "name": "dringewald",
+    "email": "dringewald@nox-gaming.de"
+  },
   "license": "ISC",
   "repository": {
     "type": "git",
@@ -18,8 +21,8 @@
     "dist": "electron-builder"
   },
   "devDependencies": {
-    "electron": "^35.1.3",
-    "electron-builder": "^24.14.1"
+    "electron": "^36.1.0",
+    "electron-builder": "^26.0.15"
   },
   "build": {
     "appId": "de.dringewald.cs2hue",
@@ -43,11 +46,20 @@
     },
     "mac": {
       "icon": "build/icons/icon.icns",
-      "target": "dmg"
+      "target": [
+        "dmg",
+        "zip"
+      ]
     },
     "linux": {
       "icon": "build/icons/512x512.png",
-      "target": "AppImage"
+      "target": [
+        "AppImage",
+        "deb"
+      ]
     }
+  },
+  "dependencies": {
+    "cs2hue": "file:"
   }
 }
