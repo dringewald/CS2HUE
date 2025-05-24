@@ -28,11 +28,34 @@
         "enabled": true
     },
     "bomb": {
-        "bri": 25,
+        "enabled": true,
         "x": 0.675,
         "y": 0.322,
-        "useCt": false,
-        "enabled": true
+        "bri": 25,
+        "initialTime": 40,
+        "initialBlinkSpeed": 1000,
+        "stages": {
+            "30": {
+                "bri": 20,
+                "speed": 750
+            },
+            "20": {
+                "bri": 35,
+                "speed": 500
+            },
+            "12": {
+                "bri": 50,
+                "speed": 250
+            },
+            "5": {
+                "bri": 100,
+                "speed": 150
+            },
+            "2": {
+                "bri": 150,
+                "speed": 0
+            }
+        }
     },
     "exploded": {
         "bri": 100,
