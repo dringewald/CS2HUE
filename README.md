@@ -3,7 +3,7 @@
 [![Made with Electron](https://img.shields.io/badge/Made%20with-Electron-2ea44f?logo=electron)](https://www.electronjs.org/) 
 [![Game Integration](https://img.shields.io/badge/Game-CS2-0065a0?logo=counter-strike)](https://www.counter-strike.net/cs2) 
 [![Docs](https://img.shields.io/badge/📖%20View%20Docs-CS2Hue-e05d44)](https://dringewald.github.io/CS2HUE/)
-[![MIT License](https://img.shields.io/badge/⚖️%20License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![MIT License](https://img.shields.io/badge/⚖️%20License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)<br/>
 [![Created with ChatGPT](https://img.shields.io/badge/Created%20with-ChatGPT-10a37f?logo=openai)](https://openai.com/chatgpt)
 [![Join us on Discord](https://img.shields.io/badge/Discord-Join%20Now-5865F2?logo=discord)](https://discord.gg/jymDumdFVU)
 [![Donate on PayPal](https://img.shields.io/badge/Donate-PayPal-0070ba?logo=paypal)](https://www.paypal.com/paypalme/NoXHolt)

@@ -4,3 +4,4 @@ node_modules/
 previousState.json
 logs/
 dist/
+backups/

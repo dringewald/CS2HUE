@@ -1183,14 +1183,13 @@ function resetInternalFlags() {
     clearSessionLog();
 }
 
-const anyLightInSyncMode = async () => {
-    if (!lightIDs || lightIDs.length === 0) {
+const anyLightInSyncMode = async (ids, hueAPI) => {
+    if (!ids || ids.length === 0) {
         console.warn("⚠️ lightIDs not ready yet.");
-        return false; // Exit early if lightIDs are not ready
+        return false;
     }
 
-    // Proceed with the logic if lightIDs are ready
-    for (const id of lightIDs) {
+    for (const id of ids) {
         try {
             const res = await fetch(`${hueAPI}/lights/${id}`);
             const json = await res.json();
