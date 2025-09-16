@@ -15,7 +15,45 @@
 <body>
   <h1>💣 CS2 Hue Bomb Control</h1>
 
+  <div id="globalSpinner" class="spinner-overlay">
+    <div class="spinner"></div>
+    <div id="spinnerStatusText" class="spinner-status-text"></div>
+  </div>
+
+  <div id="lightSelectionModal" class="modal">
+    <div class="modal-content">
+      <h2 id="modalTitle"></h2>
+      <p id="modalCallout"></p>
+
+      <!-- 🔴 Modal Warning -->
+      <p id="modalWarning" style="display: none; color: #ff4d4d; font-weight: bold; margin-top: 0;"></p>
+
+      <!-- Tabs -->
+      <div class="tab-container">
+        <button class="tab-btn active" data-tab="grouped">Grouped</button>
+        <button class="tab-btn" data-tab="all">All</button>
+      </div>
+
+      <!-- Tab content panes -->
+      <div class="tab-content">
+        <div id="groupedTab" class="tab-pane active">
+          <ul id="groupedLightsList" class="light-list lightCheckboxList"></ul>
+        </div>
+        <div id="allTab" class="tab-pane">
+          <ul id="allLightsList" class="light-list"></ul>
+        </div>
+      </div>
+
+      <!-- Footer buttons -->
+      <div class="modal-footer">
+        <button id="confirmLightSelection">✅ OK</button>
+        <button id="cancelLightSelection">❌ Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <div class="section">
+    <button class="oldborder" id="autoDetectBridge">🔍 Auto Detect Hue Bridge</button>
     <label>Bridge IP:</label>
     <div class="toggle-secret">
       <input type="text" id="bridgeIP" class="secret-input" placeholder="The IP of your Hue Bridge"
@@ -52,9 +90,16 @@
       </button>
     </div>
 
-    <label>Light IDs (comma separated):</label>
-    <input type="text" id="lightIds" class="secret-input visible" placeholder="e.g. 1,2,3"
-      title="Comma-separated list of Hue light IDs you want to control. Get IDs via the Hue API or developer tools.">
+    <div class="form-row with-light-selector">
+      <label for="lightIds">Light IDs (comma separated):</label>
+      <div class="light-id-wrapper">
+        <input type="text" id="lightIds" class="secret-input visible" placeholder="e.g. 1,2,3"
+          title="Comma-separated list of Hue light IDs you want to control. Get IDs via the Hue API or developer tools." />
+        <button id="reselectLightsBtn" class="reselect-button" title="Reopen light selector to update Light IDs">
+          🔁 Select Lights
+        </button>
+      </div>
+    </div>
 
     <label>Show Bomb Timer:</label>
     <select id="showTimer" title="Enables extra logs showing the bomb countdown (only if a bomb is planted).">
@@ -79,20 +124,20 @@
     <input type="number" id="liveLogNumber" class="secret-input visible" placeholder="1000"
       title="Max number of log lines to keep in memory for the HTML live view. Adjust higher for long sessions if needed. Higher = More RAM">
 
-    <button id="saveConfig">💾 Save Config</button>
-    <button id="openConfig">📁 Open Config Folder</button>
+    <button class="oldborder" id="saveConfig">💾 Save Config</button>
+    <button class="oldborder" id="openConfig">📁 Open Config Folder</button>
   </div>
 
   <div class="section">
     <h3>🎨 Edit Colors</h3>
     <div id="colorsDisplay"></div>
-    <button id="saveColors">💾 Save Colors</button>
+    <button class="oldborder" id="saveColors">💾 Save Colors</button>
   </div>
 
   <div id="bombSettingsWrapper" class="section">
     <h3>💣 Bomb Settings</h3>
     <div id="bombStagesGrid"></div>
-    <button id="saveBombSettings">💾 Save Bomb Stages</button>
+    <button class="oldborder" id="saveBombSettings">💾 Save Bomb Stages</button>
   </div>
 
   <div class="section" id="controlButtons">
