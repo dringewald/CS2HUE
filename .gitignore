@@ -5,3 +5,4 @@ previousState.json
 logs/
 dist/
 backups/
+config.json
