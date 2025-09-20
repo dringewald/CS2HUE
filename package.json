@@ -1,7 +1,7 @@
 {
   "name": "cs2hue",
-  "version": "1.0.1",
-  "description": "Control Hue Lights with CS2",
+  "version": "1.0.2",
+  "description": "Control Hue and Yeelight Lights with CS2",
   "main": "main.js",
   "author": {
     "name": "dringewald",
