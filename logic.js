@@ -145,13 +145,67 @@ async function loadConfig() {
     isTimerEnabled = !!config.SHOW_BOMB_TIMER;
 }
 
+// Lazily build the controller if the script isn't running (used by color test)
 async function ensureControllerReady() {
-    if (controller) return;
+    if (controller) return true;
+
     try {
-        await loadConfig(); // this constructs HueController or YeelightController
+        if (!fs.existsSync(getConfigPath())) {
+            warn('⚠️ config.json missing, cannot initialize controller.');
+            return false;
+        }
+
+        const cfg = JSON.parse(fs.readFileSync(getConfigPath(), 'utf-8'));
+        config = cfg;
+
+        // Provider + LIGHT_IDs
+        provider = (cfg.PROVIDER || 'hue').toLowerCase();
+        try {
+            const raw = (cfg.LIGHT_ID || '').trim();
+            lightIDs = raw ? raw.split(',').map(id => id.trim()).filter(Boolean) : [];
+        } catch {
+            lightIDs = [];
+        }
+
+        if (provider === 'yeelight') {
+            // Parse YEELIGHT_DEVICES into {host,port}[]
+            let devices = String(cfg.YEELIGHT_DEVICES || '')
+                .split(',')
+                .map(s => s.trim())
+                .filter(Boolean)
+                .map(token => {
+                    const [host, portStr] = token.split(':');
+                    return { host, port: Number(portStr || 55443) };
+                });
+
+            // Optional discovery if enabled and none configured
+            if (cfg.YEELIGHT_DISCOVERY === true && devices.length === 0) {
+                try {
+                    const discovered = await YeelightController.discover(2000);
+                    devices = discovered;
+                    info(`🔎 Yeelight discovery found ${devices.length} device(s).`);
+                } catch (e) {
+                    warn(`⚠️ Yeelight discovery failed: ${e.message}`);
+                }
+            }
+
+            controller = new YeelightController({ devices });
+            if (!devices.length) {
+                warn('⚠️ Yeelight: no devices configured/reachable.');
+            }
+        } else {
+            controller = new HueController({
+                bridgeIP: cfg.BRIDGE_IP,
+                apiKey: cfg.API_KEY
+            });
+            setHueAPI(`http://${cfg.BRIDGE_IP}/api/${cfg.API_KEY}`);
+        }
+
+        isTimerEnabled = !!cfg.SHOW_BOMB_TIMER;
+        return true;
     } catch (e) {
-        error(`❌ Controller init failed: ${e.message}`);
-        throw e;
+        error(`❌ ensureControllerReady failed: ${e.message}`);
+        return false;
     }
 }
 
@@ -161,7 +215,10 @@ function forEachLight(callback) {
 
 async function getLightData(light) {
     try {
-        await ensureControllerReady();
+        if (!controller) {
+            const ok = await ensureControllerReady();
+            if (!ok) throw new Error('Controller not initialized');
+        }
         return await controller.getState(light);
     } catch (e) {
         error(e.message);
@@ -174,13 +231,19 @@ const MIN_GAP_MS = 60;              // small per-light pause after each PUT
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-
 async function updateLightData(light, body) {
+    if (!controller) {
+        const ok = await ensureControllerReady();
+        if (!ok) {
+            error('⛔ Controller not initialized');
+            return false;
+        }
+    }
+
     const prev = lightQueues.get(light) || Promise.resolve();
 
     const next = prev.then(async () => {
         try {
-            await ensureControllerReady();
             await controller.setState(light, body);
             await sleep(MIN_GAP_MS);
             return true;
@@ -528,22 +591,11 @@ async function startScript() {
     if (provider === 'hue') {
         info("🎯 Connecting to Hue Bridge...");
         try {
-            await fetchWithTimeout(`http://${config.BRIDGE_IP}`, { method: 'HEAD' }, 1000);
+            await probeHueBridge(config.BRIDGE_IP, config.API_KEY);
         } catch (err) {
             error(`❌ Could not reach Hue Bridge at ${config.BRIDGE_IP}`);
             error(`🛜 Network error: ${err.message}`);
             error(`💡 Check BRIDGE_IP / firewall.`);
-            return;
-        }
-
-        try {
-            const res = await fetchWithTimeout(`${hueAPI}/lights`, {}, 2000);
-            if (!res.ok) throw new Error(`Bridge returned HTTP ${res.status}`);
-            const lights = await res.json();
-            if (!lights || typeof lights !== 'object') throw new Error('Unexpected response format from /lights');
-        } catch (err) {
-            error(`❌ Failed to query Hue Bridge API — check your API key or IP`);
-            error(`🔎 Details: ${err.message}`);
             return;
         }
 
@@ -1267,6 +1319,34 @@ function setHueAPI(url) {
 
 function getHueAPI() {
     return hueAPI;
+}
+
+// Try a few real Hue endpoints with modest timeouts + one short backoff.
+async function probeHueBridge(bridgeIP, apiKey) {
+    const base = `http://${bridgeIP}`;
+
+    // Try description.xml (Hue advertises here)
+    try {
+        const r = await fetchWithTimeout(`${base}/description.xml`, {}, 2500);
+        if (r.ok) return;
+    } catch { }
+
+    // Try /api/<key>/config (very light, no payload)
+    try {
+        const r = await fetchWithTimeout(`${base}/api/${apiKey}/config`, {}, 2500);
+        if (r.ok) return;
+    } catch { }
+
+    // Try /api/<key>/lights
+    try {
+        const r = await fetchWithTimeout(`${base}/api/${apiKey}/lights`, {}, 2500);
+        if (r.ok) return;
+    } catch { }
+
+    // Tiny backoff, then one last try on /lights with a slightly longer timeout
+    await new Promise(r => setTimeout(r, 400));
+    const last = await fetchWithTimeout(`${base}/api/${apiKey}/lights`, {}, 3000);
+    if (!last.ok) throw new Error(`Bridge returned HTTP ${last.status}`);
 }
 
 module.exports = {
