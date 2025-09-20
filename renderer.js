@@ -414,6 +414,49 @@ function showLightSelectionModal(lightList, options = {}) {
     modal.style.display = 'flex';
 }
 
+// Toggle Sichtbarkeit anhand des Provider-Dropdowns (#provider)
+function applyProviderVisibility() {
+    const providerEl = document.getElementById('provider');
+    const provider = (providerEl?.value || 'hue').toLowerCase();
+
+    const isHue = provider === 'hue';
+    const isYeelight = provider === 'yeelight';
+
+    // kleine Helfer
+    const toggle = (el, show) => { if (el) el.style.display = show ? '' : 'none'; };
+    const toggleField = (inputId, show) => {
+        const input = document.getElementById(inputId);
+        if (!input) return;
+        const wrapper = input.closest('.toggle-secret') || input.parentElement;
+        if (wrapper) wrapper.style.display = show ? '' : 'none';
+        const maybeLabel = wrapper?.previousElementSibling;
+        if (maybeLabel && maybeLabel.tagName === 'LABEL') {
+            maybeLabel.style.display = show ? '' : 'none';
+        }
+    };
+
+    // Hue-only UI
+    toggle(document.getElementById('autoDetectBridge'), isHue);
+    toggleField('bridgeIP', isHue);
+    toggleField('apiKey', isHue);
+    toggle(document.getElementById('reselectLightsBtn'), isHue);
+
+    // Yeelight-Block
+    toggle(document.getElementById('yeelightBlock'), isYeelight);
+
+    // Light-IDs UX
+    const lightIdsInput = document.getElementById('lightIds');
+    if (lightIdsInput) {
+        if (isHue) {
+            lightIdsInput.placeholder = 'e.g. 1,2,3';
+            lightIdsInput.title = 'Comma-separated list of Hue light IDs.';
+        } else if (isYeelight) {
+            lightIdsInput.placeholder = 'e.g. 1,2';
+            lightIdsInput.title = 'Comma-separated indices of Yeelight devices (order of YEELIGHT_DEVICES, starting at 1).';
+        }
+    }
+}
+
 // Load stuff on page load
 function initializeApp() {
     document.querySelectorAll('.toggle-secret').forEach(wrapper => {
@@ -462,15 +505,26 @@ function initializeApp() {
             document.getElementById('debugMode').value = config.DEBUG_MODE ? 'true' : 'false';
             debug('debugMode field value:', document.getElementById('debugMode').value);
             document.getElementById('liveLogNumber').value = config.LIVE_LOG_LINES || 1000;
-            debug('liveLogNumber field value:', document.getElementById('liveLogNumber').value);
-
+            debug('liveLogNumber field value:', document.getElementById('liveLogNumber').value);         
+            document.getElementById('provider').value = (config.PROVIDER || 'hue');
+            debug('provider field value:', document.getElementById('provider').value);
+            document.getElementById('yeelightDiscovery').value = String(config.YEELIGHT_DISCOVERY === true);
+            debug('yeelightDiscovery field value:', document.getElementById('yeelightDiscovery').value);
+            document.getElementById('yeelightDevices').value = config.YEELIGHT_DEVICES || '';
+            
+            applyProviderVisibility();
             info("🔧 Loaded config.json");
+            
         } catch (err) {
             error(`❌ Failed to parse config.json: ${err.message}`);
         }
     } else {
         console.warn("⚠️ config.json not found. Please fill out the form and save.");
     }
+
+    // Link Provider-UI
+    document.getElementById('provider')?.addEventListener('change', applyProviderVisibility);
+    applyProviderVisibility();
 
     const debugSelect = document.getElementById('debugMode');
     if (config.DEBUG_MODE !== undefined) {
@@ -488,6 +542,7 @@ function initializeApp() {
     // Bind events
     document.getElementById('saveConfig').addEventListener('click', () => {
         const config = {
+            PROVIDER: document.getElementById('provider').value || 'hue',
             BRIDGE_IP: document.getElementById('bridgeIP').value,
             API_KEY: document.getElementById('apiKey').value,
             SERVER_HOST: document.getElementById('serverHost').value || '127.0.0.1',
@@ -497,6 +552,8 @@ function initializeApp() {
             HTML_LOG: document.getElementById('htmlLog').value === 'true',
             DEBUG_MODE: document.getElementById('debugMode').value === 'true',
             LIVE_LOG_LINES: document.getElementById('liveLogNumber').value || 1000,
+            YEELIGHT_DISCOVERY: document.getElementById('yeelightDiscovery').value === 'true',
+            YEELIGHT_DEVICES: document.getElementById('yeelightDevices').value || ''
         };
 
         fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 4));
@@ -1224,8 +1281,37 @@ function loadColors() {
 
         // Shared test function
         async function handleColorTest(colorSourceFn) {
+            // Load config early so we know the provider even in the Stop case
+            if (!fs.existsSync(getConfigPath())) return;
+            const config = JSON.parse(fs.readFileSync(getConfigPath(), 'utf-8'));
+            const provider = (config.PROVIDER || 'hue').toLowerCase();
+            const ids = (config.LIGHT_ID || '').split(',').map(s => s.trim()).filter(Boolean);
+        
+            // === STOP CASE (second click on the same color) ===
             if (isTestingColor && testedColorName === name) {
-                await restorePreviousLightState();
+                try {
+                    if (provider === 'yeelight') {
+                        // Yeelight: restore using the controller via IPC (best effort)
+                        if (previousStateCache && typeof previousStateCache === 'object') {
+                            for (const id of Object.keys(previousStateCache)) {
+                                const st = previousStateCache[id];
+                                if (!st) continue;
+                                const restoreBody = {};
+                                if (typeof st.on === 'boolean') restoreBody.on = st.on;
+                                if (typeof st.bri === 'number') restoreBody.bri = st.bri;
+                                if (Array.isArray(st.xy)) restoreBody.xy = st.xy;
+                                if (typeof st.ct === 'number') { restoreBody.ct = st.ct; restoreBody.useCt = true; }
+                                await ipcRenderer.invoke('controller-set-state', { id, body: restoreBody });
+                            }
+                        }
+                    } else {
+                        // Hue: use existing restore logic (PUT the previous state back)
+                        await restorePreviousLightState();
+                    }
+                } catch (e) {
+                    error(`❌ Failed to restore previous state: ${e.message}`);
+                }
+        
                 info(`🔙 Stopped testing "${name}"`);
                 isTestingColor = false;
                 testedColorName = null;
@@ -1234,29 +1320,78 @@ function loadColors() {
                 ipcRenderer.send('color-test-status', isTestingColor);
                 return;
             }
-
+        
+            // Prevent parallel tests
             if (isTestingColor) {
                 warn(`⚠️ Already testing "${testedColorName}". Stop that first.`);
                 return;
             }
-
+        
+            // Do not allow testing while the main script is running
             if (isScriptRunning()) {
                 info("🚫 Cannot test while script is running.");
                 return;
             }
-
-            if (!fs.existsSync(getConfigPath())) return;
-            const config = JSON.parse(fs.readFileSync(getConfigPath(), 'utf-8'));
-            const ids = config.LIGHT_ID.split(',').map(id => id.trim());
-            const hueAPI = `http://${config.BRIDGE_IP}/api/${config.API_KEY}`;
-
-            // Set global lightIDs for use in anyLightInSyncMode
+        
+            if (ids.length === 0) {
+                warn("⚠️ No LIGHT_ID configured.");
+                return;
+            }
+        
+            // Expose light IDs globally (used by other parts of the app)
             lightIDs = ids;
             lightIDsReady = true;
-
             ipcRenderer.send('set-light-ids', ids);
+        
+            // === YEELIGHT PATH ===
+            if (provider === 'yeelight') {
+                // 1) Snapshot current state (best effort; controller may return minimal info)
+                previousStateCache = {};
+                for (const id of ids) {
+                    try {
+                        const state = await ipcRenderer.invoke('controller-get-state', { id });
+                        // Fallback if controller returns nothing
+                        previousStateCache[id] = state || { on: true, bri: 254 };
+                    } catch (err) {
+                        error(`❌ Failed to get yeelight state for ${id}: ${err.message}`);
+                        return;
+                    }
+                }
+        
+                // 2) Build the desired color/state body from the source function
+                const color = await colorSourceFn();
+                const body = { on: true, bri: color.bri ?? 200 };
+                if (color.useCt && typeof color.ct === 'number') {
+                    body.ct = color.ct; body.useCt = true;
+                } else if (typeof color.x === 'number' && typeof color.y === 'number') {
+                    body.xy = [color.x, color.y];
+                }
+        
+                // 3) Apply via controller IPC
+                for (const id of ids) {
+                    try {
+                        await ipcRenderer.invoke('controller-set-state', { id, body });
+                    } catch (err) {
+                        error(`❌ Failed to set yeelight color on ${id}: ${err.message}`);
+                    }
+                }
+        
+                // 4) Update UI/testing state
+                isTestingColor = true;
+                testedColorName = name;
+                testSavedButton.textContent = '⛔ Stop Test';
+                testLiveButton.textContent = '⛔ Stop Test';
+                ipcRenderer.send('color-test-status', isTestingColor);
+        
+                // No periodic watchdog for Yeelight (optional to add later)
+                return;
+            }
+        
+            // === HUE PATH ===
+            const hueAPI = `http://${config.BRIDGE_IP}/api/${config.API_KEY}`;
             ipcRenderer.send('set-hue-api', hueAPI);
-
+        
+            // Hue-only: check for entertainment/sync mode to avoid conflicts
             const inSync = await anyLightInSyncMode(ids, hueAPI);
             if (inSync) {
                 info("🚫 One or more lights are in sync/entertainment mode.");
@@ -1267,7 +1402,8 @@ function loadColors() {
                 ipcRenderer.send('color-test-status', isTestingColor);
                 return;
             }
-
+        
+            // Snapshot current Hue state for later restoration
             previousStateCache = {};
             for (const id of ids) {
                 try {
@@ -1280,16 +1416,17 @@ function loadColors() {
                     return;
                 }
             }
-
-            const color = await colorSourceFn();  // Fetch color dynamically
+        
+            // Build the state payload from the provided color source
+            const color = await colorSourceFn();  // Get color dynamically
             const body = { on: true, bri: color.bri ?? 200 };
-
             if (color.useCt && typeof color.ct === 'number') {
                 body.ct = color.ct;
             } else if (typeof color.x === 'number' && typeof color.y === 'number') {
                 body.xy = [color.x, color.y];
             }
-
+        
+            // Apply to Hue via REST
             for (const id of ids) {
                 try {
                     const response = await fetch(`${hueAPI}/lights/${id}/state`, {
@@ -1302,19 +1439,20 @@ function loadColors() {
                     error(`❌ Failed to set color on light ${id}: ${err.message}`);
                 }
             }
-
+        
+            // Update UI/testing state and start a simple connectivity watchdog for Hue
             isTestingColor = true;
             testedColorName = name;
             testSavedButton.textContent = '⛔ Stop Test';
             testLiveButton.textContent = '⛔ Stop Test';
             ipcRenderer.send('color-test-status', isTestingColor);
-
+        
             let watchdogInterval = setInterval(async () => {
                 if (!isTestingColor) {
                     clearInterval(watchdogInterval);
                     return;
                 }
-
+        
                 try {
                     for (const id of ids) {
                         const res = await fetch(`${hueAPI}/lights/${id}`);
@@ -1335,7 +1473,7 @@ function loadColors() {
                     clearInterval(watchdogInterval);
                 }
             }, 3000);
-        }
+        }        
 
         // Button Events
         testSavedButton.addEventListener('click', () =>
@@ -1371,39 +1509,53 @@ function loadColors() {
 
 async function restorePreviousLightState() {
     if (!previousStateCache || !fs.existsSync(getConfigPath())) return;
-
+  
     const config = JSON.parse(fs.readFileSync(getConfigPath(), 'utf-8'));
-    const ids = config.LIGHT_ID.split(',').map(id => id.trim());
-    ipcRenderer.send('set-light-ids', ids);
-    const hueAPI = `http://${config.BRIDGE_IP}/api/${config.API_KEY}`;
-
-    for (const id of ids) {
+    const provider = (config.PROVIDER || 'hue').toLowerCase();
+    const ids = (config.LIGHT_ID || '').split(',').map(id => id.trim()).filter(Boolean);
+  
+    if (provider === 'yeelight') {
+      // Restore via controller (IPC)
+      for (const id of ids) {
         const prev = previousStateCache[id];
         if (!prev) continue;
-
-        const body = {
-            on: prev.on,
-            bri: prev.bri
-        };
+        const body = {};
+        if (typeof prev.on === 'boolean') body.on = prev.on;
+        if (typeof prev.bri === 'number') body.bri = prev.bri;
+        if (Array.isArray(prev.xy)) body.xy = prev.xy;
+        if (typeof prev.ct === 'number') { body.ct = prev.ct; body.useCt = true; }
+        try {
+          await ipcRenderer.invoke('controller-set-state', { id, body });
+        } catch (err) {
+          error(`❌ Failed to restore Yeelight ${id}: ${err.message}`);
+        }
+      }
+    } else {
+      // Hue path (wie zuvor)
+      ipcRenderer.send('set-light-ids', ids);
+      const hueAPI = `http://${config.BRIDGE_IP}/api/${config.API_KEY}`;
+      for (const id of ids) {
+        const prev = previousStateCache[id];
+        if (!prev) continue;
+        const body = { on: prev.on, bri: prev.bri };
         if (prev.xy) body.xy = prev.xy;
         if (typeof prev.ct === 'number') body.ct = prev.ct;
-
+  
         try {
-            const response = await fetch(`${hueAPI}/lights/${id}/state`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body)
-            });
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status} - ${response.statusText}`);
-            }
+          const response = await fetch(`${hueAPI}/lights/${id}/state`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+          });
+          if (!response.ok) throw new Error(`HTTP ${response.status} - ${response.statusText}`);
         } catch (err) {
-            error(`❌ Failed to restore light ${id} state: ${err.message}`);
+          error(`❌ Failed to restore light ${id} state: ${err.message}`);
         }
+      }
     }
-
+  
     previousStateCache = {};
-}
+  }  
 
 document.getElementById('saveColors').addEventListener('click', () => {
     const inputs = document.querySelectorAll('#colorsDisplay input');
@@ -1612,6 +1764,10 @@ function reloadSettings() {
     document.getElementById('htmlLog').value = savedConfig.HTML_LOG ? 'true' : 'false';
     document.getElementById('liveLogNumber').value = savedConfig.LIVE_LOG_LINES || 1000;
     document.getElementById('debugMode').value = savedConfig.DEBUG_MODE ? 'true' : 'false';
+    document.getElementById('provider').value = (savedConfig.PROVIDER || 'hue');
+    document.getElementById('yeelightDiscovery').value = String(savedConfig.YEELIGHT_DISCOVERY === true);
+    document.getElementById('yeelightDevices').value = savedConfig.YEELIGHT_DEVICES || '';
+
     setDebugMode(savedConfig.DEBUG_MODE);
     setHtmlLogEnabled(savedConfig.HTML_LOG);
     if (savedConfig.LIVE_LOG_LINES !== undefined) {
@@ -1933,22 +2089,22 @@ function populateLightsUI(grouped, all) {
 }
 
 function resetModalHeader(title = '💡 Select Your Hue Lights') {
-    const modal   = document.getElementById('lightSelectionModal');
+    const modal = document.getElementById('lightSelectionModal');
     if (!modal) return;
     const content = modal.querySelector('.modal-content') || modal;
-  
+
     // Title
     let h2 = content.querySelector('h2');
     if (!h2) { h2 = document.createElement('h2'); content.prepend(h2); }
     h2.textContent = title;
-  
+
     // Clear message box + warning (leftovers from showMessageModal)
     const msgBody = content.querySelector('#modalMessageBody');
     if (msgBody) msgBody.innerHTML = '';
     const warning = content.querySelector('#modalWarning');
     if (warning) { warning.textContent = ''; warning.style.display = 'none'; }
-  
+
     // Make sure selection UI is visible
     content.querySelectorAll('.tab-btn, .tab-pane, #groupedLightsList, #allLightsList')
-           .forEach(el => el.style.display = '');
-  }
+        .forEach(el => el.style.display = '');
+}

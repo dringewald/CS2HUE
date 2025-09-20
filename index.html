@@ -54,6 +54,11 @@
 
   <div class="section">
     <button class="oldborder" id="autoDetectBridge">🔍 Auto Detect Hue Bridge</button>
+    <label>Provider:</label>
+    <select id="provider" title="Choose which lighting system to use">
+      <option value="hue">Hue</option>
+      <option value="yeelight">Yeelight</option>
+    </select>
     <label>Bridge IP:</label>
     <div class="toggle-secret">
       <input type="text" id="bridgeIP" class="secret-input" placeholder="The IP of your Hue Bridge"
@@ -70,6 +75,17 @@
       <button class="reveal-btn" type="button">
         <img src="img/eye-password-hide.svg" alt="toggle visibility" />
       </button>
+    </div>
+
+    <div id="yeelightBlock" style="display:none; margin-top:8px">
+      <label>Yeelight Discovery:</label>
+      <select id="yeelightDiscovery">
+        <option value="false">Disabled</option>
+        <option value="true">Enabled</option>
+      </select>
+    
+      <label>Yeelight Devices (host[:port], comma-separated):</label>
+      <input type="text" id="yeelightDevices" placeholder="192.168.0.21:55443, 192.168.0.22" />
     </div>
 
     <label>Server IP:</label>

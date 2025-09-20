@@ -6,6 +6,10 @@ const fsPromises = require('fs').promises;
 
 const http = require('http');
 const fs = require('fs');
+const HueController = require('./controllers/hueController');
+const YeelightController = require('./controllers/yeelightController');
+let controller = null;
+let provider = 'hue';
 
 let config;
 let colors;
@@ -50,15 +54,7 @@ let pollerActive = false;
 let isWritingGameState = false;
 let suppressDefaultColor = false;
 
-function sanitizeColorObject(obj) {
-    for (const key in obj) {
-        if (obj[key] === null || key === 'undefined') {
-            delete obj[key];
-        }
-    }
-    return obj;
-}
-
+// logic.js
 async function loadConfig() {
     const configPath = getConfigPath();
     const colorsFilePath = getColorsPath();
@@ -75,27 +71,62 @@ async function loadConfig() {
     colors = JSON.parse(await fsPromises.readFile(colorsFilePath, 'utf-8'));
 
     try {
-        // Initialize lightIDs here from config.json
-        lightIDs = config.LIGHT_ID.split(',').map(id => id.trim());
+        const raw = (config.LIGHT_ID || '').trim();
+        lightIDs = raw ? raw.split(',').map(id => id.trim()).filter(Boolean) : [];
     } catch (err) {
         error(`❌ Failed to get Light IDs from config: ${err.message}`);
         return;
     }
 
-    // Sanitize colors
     for (const name in colors) {
         const color = colors[name];
-
-        sanitizeColorObject(color);
-
+        for (const key in color) {
+            if (color[key] === null || key === 'undefined') {
+                delete color[key];
+            }
+        }
         if (!('enabled' in color)) {
             color.enabled = true;
         }
     }
 
-    // Initialize other config properties
-    setHueAPI(`http://${config.BRIDGE_IP}/api/${config.API_KEY}`);
-    isTimerEnabled = config.SHOW_BOMB_TIMER;
+    provider = (config.PROVIDER || 'hue').toLowerCase();
+
+    if (provider === 'yeelight') {
+        let devices = String(config.YEELIGHT_DEVICES || '')
+            .split(',')
+            .map(s => s.trim())
+            .filter(Boolean)
+            .map(token => {
+                const [host, portStr] = token.split(':');
+                return { host, port: Number(portStr || 55443) };
+            });
+
+        if (config.YEELIGHT_DISCOVERY === true && devices.length === 0) {
+            try {
+                const discovered = await YeelightController.discover(2500);
+                if (discovered.length) {
+                    devices = discovered;
+                    info(`🔎 Yeelight discovery found ${devices.length} device(s).`);
+                } else {
+                    warn("⚠️ Yeelight discovery found no devices.");
+                }
+            } catch (e) {
+                warn(`⚠️ Yeelight discovery failed: ${e.message}`);
+            }
+        }
+
+        controller = new YeelightController({ devices });
+    } else {
+        controller = new HueController({
+            bridgeIP: config.BRIDGE_IP,
+            apiKey: config.API_KEY
+        });
+
+        setHueAPI(`http://${config.BRIDGE_IP}/api/${config.API_KEY}`);
+    }
+
+    isTimerEnabled = !!config.SHOW_BOMB_TIMER;
 }
 
 function forEachLight(callback) {
@@ -103,99 +134,51 @@ function forEachLight(callback) {
 }
 
 async function getLightData(light) {
-    try {
-        const response = await fetch(`${hueAPI}/lights/${light}`);
-        const body = await response.json();
-        return body.state;
-    } catch (error) {
-        error(error);
-    }
+    try { return await controller.getState(light); }
+    catch (e) { error(e.message); return {}; }
 }
+
+const lightQueues = new Map();
+const MIN_GAP_MS = 60;              // small per-light pause after each PUT
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 async function updateLightData(light, body) {
-    if (!hueAPI) {
-        error("❌ hueAPI is undefined — cannot update light");
-        return false;
-    }
+    const prev = lightQueues.get(light) || Promise.resolve();
 
-    try {
-        const res = await fetch(`${hueAPI}/lights/${light}/state`, {
-            method: "PUT",
-            body: JSON.stringify(body),
-            headers: { "Content-Type": "application/json" }
-        });
-
-        if (!res.ok) {
-            throw new Error(`Light ${light} update failed with HTTP ${res.status}`);
-        }
-
-        debug(`✅ Light ${light} updated: ${JSON.stringify(body)}`);
-        debug(`🔌 Shutdown Light ${light} - update attempted: ${JSON.stringify(body)}`);
-
-        return true;
-    } catch (err) {
-        error(`UpdateLightData failed for light ${light}: ${err.message}`);
-        return false;
-    }
-}
-
-function changeBrightness(light, value) {
-    getLightData(light).then(previousState => {
-        if (previousState.on === false) {
-            updateLightData(light, { "on": true, "bri": value });
-            updateLightData(light, { "on": false });
-        } else {
-            updateLightData(light, { "bri": value });
+    const next = prev.then(async () => {
+        try {
+            await controller.setState(light, body);
+            // tiny gap keeps Hue bridge happy under bursts
+            await sleep(MIN_GAP_MS);
+            return true;
+        } catch (e) {
+            error(`Update failed for ${light}: ${e.message}`);
+            return false;
         }
     });
-}
 
-function blinkLight(light, speed, repetition, onDone = () => { }) {
-    let repeater = 0;
-
-    const interval = setInterval(async () => {
-        const state = await getLightData(light);
-        if (state.on === true) {
-            updateLightData(light, { on: false });
-        } else {
-            updateLightData(light, { on: true });
-            repeater++;
-            if (repetition !== Infinity && repeater >= repetition) {
-                clearInterval(interval);
-                onDone();
-            }
-        }
-    }, speed);
-
-    return interval;
+    lightQueues.set(light, next);
+    return next;
 }
 
 async function sendColorToAllLights(color) {
-    if (!color || color.enabled === false) {
-        info("⛔ Color is disabled or missing, skipping...");
-        return;
+    if (!color || color.enabled === false) { info("⛔ Color disabled/missing"); return; }
+
+    const body = { on: true };
+    if (color.useCt && typeof color.ct === 'number') body.ct = color.ct;
+    else if (typeof color.x === 'number' && typeof color.y === 'number') body.xy = [color.x, color.y];
+    if (typeof color.bri === 'number') body.bri = color.bri;
+
+    // write with slight staggering to avoid bursts
+    for (let i = 0; i < lightIDs.length; i++) {
+        updateLightData(lightIDs[i], body);
+        await new Promise(r => setTimeout(r, 12)); // ~12ms between PUTs
     }
-
-    const body = {
-        on: true
-    };
-
-    if (typeof color.ct === 'number' && color.useCt) {
-        body.ct = color.ct;
-    } else if (typeof color.x === 'number' && typeof color.y === 'number') {
-        body.xy = [color.x, color.y];
-    }
-
-    if (typeof color.bri === 'number') {
-        body.bri = color.bri;
-    }
-
-    debug(`🚨 Sending color to all lights: ${JSON.stringify(body)}`);
-
-    await Promise.all(lightIDs.map(light => updateLightData(light, body)));
 }
 
 function blinkAllLights(speed, repetition = Infinity) {
+    // stop previous blinks
     if (blinkEffect.length) {
         blinkEffect.forEach(clearInterval);
         blinkEffect = [];
@@ -203,23 +186,34 @@ function blinkAllLights(speed, repetition = Infinity) {
 
     isBlinking = true;
 
-    let active = lightIDs.length;
+    let cycles = 0;
+    let isOn = false;
 
-    blinkEffect = lightIDs.map(light => {
-        return blinkLight(light, speed, repetition, () => {
-            active--;
-            if (active === 0) {
+    const interval = setInterval(async () => {
+        isOn = !isOn;
+
+        // fan out with a tiny stagger to avoid a PUT burst on the bridge
+        for (let i = 0; i < lightIDs.length; i++) {
+            updateLightData(lightIDs[i], { on: isOn });
+            if (i) await new Promise(r => setTimeout(r, 8));
+        }
+
+        // keep original “count ON edges” semantics
+        if (isOn) {
+            cycles++;
+            if (repetition !== Infinity && cycles >= repetition) {
+                clearInterval(interval);
                 isBlinking = false;
-                debug("✅ All blinking finished.");
             }
-        });
-    });
+        }
+    }, Math.max(120, speed | 0)); // clamp a bit for bridge stability
 
+    blinkEffect = [interval];
     return blinkEffect;
 }
 
 function changeAllBrightness(value) {
-    forEachLight(light => changeBrightness(light, value));
+    return Promise.all(lightIDs.map(light => updateLightData(light, { on: true, bri: value })));
 }
 
 function resetBombState() {
@@ -476,10 +470,7 @@ function setUserTeamColor() {
 }
 
 async function startScript() {
-    if (isRunning) {
-        warn("⚠️ Script is already running.");
-        return;
-    }
+    if (isRunning) { warn("⚠️ Script is already running."); return; }
 
     if (!getGamestatePath() || !getPreviousStatePath()) {
         error("❌ Paths not initialized. Please call setBasePath() before starting the script.");
@@ -498,40 +489,36 @@ async function startScript() {
         return;
     }
 
-    info("🎯 Connecting to Hue Bridge...");
-    // Quick check for IP reachability
-    try {
-        await fetchWithTimeout(`http://${config.BRIDGE_IP}`, { method: 'HEAD' }, 1000);
-    } catch (err) {
-        error(`❌ Could not reach Hue Bridge at ${config.BRIDGE_IP}`);
-        error(`🛜 Network error: ${err.message}`);
-        error(`💡 Please check your config entries for correct BRIDGE_IP and ensure your firewall isn't blocking local connections.`);
-        return;
-    }
-
-    // Check API key & lights access
-    try {
-        const res = await fetchWithTimeout(`${hueAPI}/lights`, {}, 2000);
-        if (!res.ok) {
-            throw new Error(`Bridge returned HTTP ${res.status}`);
+    if (provider === 'hue') {
+        info("🎯 Connecting to Hue Bridge...");
+        try {
+            await fetchWithTimeout(`http://${config.BRIDGE_IP}`, { method: 'HEAD' }, 1000);
+        } catch (err) {
+            error(`❌ Could not reach Hue Bridge at ${config.BRIDGE_IP}`);
+            error(`🛜 Network error: ${err.message}`);
+            error(`💡 Check BRIDGE_IP / firewall.`);
+            return;
         }
 
-        const lights = await res.json();
-        if (!lights || typeof lights !== 'object') {
-            throw new Error('Unexpected response format from /lights');
+        try {
+            const res = await fetchWithTimeout(`${hueAPI}/lights`, {}, 2000);
+            if (!res.ok) throw new Error(`Bridge returned HTTP ${res.status}`);
+            const lights = await res.json();
+            if (!lights || typeof lights !== 'object') throw new Error('Unexpected response format from /lights');
+        } catch (err) {
+            error(`❌ Failed to query Hue Bridge API — check your API key or IP`);
+            error(`🔎 Details: ${err.message}`);
+            return;
         }
-    } catch (err) {
-        error(`❌ Failed to query Hue Bridge API — check your API key or IP`);
-        error(`🔎 Details: ${err.message}`);
-        error(`💡 Please ensure your API_KEY in config.json is valid. You can regenerate it via the Hue Developer CLI or bridge debug tools.`);
-        return;
-    }
 
-    // Check sync mode BEFORE starting server
-    const inSync = await anyLightInSyncMode();
-    if (inSync) {
-        info("🚫 One or more lights are in sync/entertainment mode.");
-        return;
+        const inSync = await anyLightInSyncMode(lightIDs, hueAPI);
+        if (inSync) {
+            info("🚫 One or more lights are in sync/entertainment mode.");
+            return;
+        }
+    } else {
+        info("🟡 Yeelight mode: skipping Hue bridge checks.");
+        // Optional: später Discovery/Reachability Checks für Yeelight ergänzen.
     }
 
     const host = config.SERVER_HOST || '127.0.0.1';
@@ -1067,19 +1054,18 @@ async function fadeOutLight(light, duration = 1000, steps = 10) {
 
 async function stopScript(apiFromMain = null) {
     debug("🏃 stopScript is running");
-    if (!isRunning) {
-        info("⚠️ Script is not running.");
-        return;
-    }
+    if (!isRunning) { info("⚠️ Script is not running."); return; }
 
-    if (!hueAPI && apiFromMain) {
-        hueAPI = apiFromMain;
-        info(`[MAIN->LOGIC] hueAPI injected from main process: ${hueAPI}`);
-    }
-
-    if (!hueAPI) {
-        error("❌ hueAPI is undefined and no fallback was provided.");
-        return;
+    if (provider === 'hue') {
+        if (!hueAPI && apiFromMain) {
+            hueAPI = apiFromMain;
+            info(`[MAIN->LOGIC] hueAPI injected from main process: ${hueAPI}`);
+        }
+        if (!hueAPI) {
+            warn("⚠️ hueAPI missing, but continuing shutdown (provider=hue).");
+        }
+    } else {
+        debug("🟡 Yeelight mode: no hueAPI needed during shutdown.");
     }
 
     isRunning = false;
@@ -1254,4 +1240,6 @@ module.exports = {
     setHueAPI,
     getHueAPI,
     anyLightInSyncMode,
+    getLightData,
+    updateLightData,
 };

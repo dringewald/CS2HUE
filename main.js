@@ -6,7 +6,6 @@ app.commandLine.appendSwitch('no-timers-throttle');
 let win;
 let isTestingColor = false;
 let cleanupDone = false;
-let resetLightsDone = false;
 let currentHueAPI = null;
 
 ipcMain.on('color-test-status', (event, status) => {
@@ -53,6 +52,22 @@ ipcMain.on('stop-script', async () => {
         setHueAPI(currentHueAPI);
     }
     await stopScript();
+});
+
+ipcMain.handle('controller-get-state', async (event, { id }) => {
+    const logic = require('./logic');
+    if (typeof logic.getLightData === 'function') {
+        return await logic.getLightData(id);
+    }
+    return {};
+});
+
+ipcMain.handle('controller-set-state', async (event, { id, body }) => {
+    const logic = require('./logic');
+    if (typeof logic.updateLightData === 'function') {
+        return await logic.updateLightData(id, body);
+    }
+    return false;
 });
 
 let blockerId;
