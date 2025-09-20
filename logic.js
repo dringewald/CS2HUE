@@ -117,6 +117,22 @@ async function loadConfig() {
         }
 
         controller = new YeelightController({ devices });
+
+        {
+            const zeros = lightIDs.filter(id => Number(id) === 0);
+            if (zeros.length) {
+                warn('⚠️ Yeelight LIGHT_ID must start at 1. Remove 0 from LIGHT_ID.');
+            }
+            if (!controller.devices?.length) {
+                warn('⚠️ No Yeelight devices configured/reachable.');
+            } else {
+                const max = controller.devices.length;
+                const outOfRange = lightIDs.filter(id => Number(id) < 1 || Number(id) > max);
+                if (outOfRange.length) {
+                    warn(`⚠️ Some LIGHT_IDs are out of range (1..${max}): ${outOfRange.join(', ')}`);
+                }
+            }
+        }
     } else {
         controller = new HueController({
             bridgeIP: config.BRIDGE_IP,
@@ -129,13 +145,28 @@ async function loadConfig() {
     isTimerEnabled = !!config.SHOW_BOMB_TIMER;
 }
 
+async function ensureControllerReady() {
+    if (controller) return;
+    try {
+        await loadConfig(); // this constructs HueController or YeelightController
+    } catch (e) {
+        error(`❌ Controller init failed: ${e.message}`);
+        throw e;
+    }
+}
+
 function forEachLight(callback) {
     lightIDs.forEach(light => callback(light));
 }
 
 async function getLightData(light) {
-    try { return await controller.getState(light); }
-    catch (e) { error(e.message); return {}; }
+    try {
+        await ensureControllerReady();
+        return await controller.getState(light);
+    } catch (e) {
+        error(e.message);
+        return {};
+    }
 }
 
 const lightQueues = new Map();
@@ -143,13 +174,14 @@ const MIN_GAP_MS = 60;              // small per-light pause after each PUT
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
+
 async function updateLightData(light, body) {
     const prev = lightQueues.get(light) || Promise.resolve();
 
     const next = prev.then(async () => {
         try {
+            await ensureControllerReady();
             await controller.setState(light, body);
-            // tiny gap keeps Hue bridge happy under bursts
             await sleep(MIN_GAP_MS);
             return true;
         } catch (e) {
@@ -166,8 +198,10 @@ async function sendColorToAllLights(color) {
     if (!color || color.enabled === false) { info("⛔ Color disabled/missing"); return; }
 
     const body = { on: true };
-    if (color.useCt && typeof color.ct === 'number') body.ct = color.ct;
-    else if (typeof color.x === 'number' && typeof color.y === 'number') body.xy = [color.x, color.y];
+    if (color.useCt && typeof color.ct === 'number') {
+        body.ct = color.ct;
+        if (provider === 'yeelight') body.useCt = true;
+    } else if (typeof color.x === 'number' && typeof color.y === 'number') body.xy = [color.x, color.y];
     if (typeof color.bri === 'number') body.bri = color.bri;
 
     // write with slight staggering to avoid bursts
@@ -428,6 +462,7 @@ function setDefaultColor() {
 
     if (color.useCt && typeof ct === 'number') {
         body.ct = ct;
+        if (provider === 'yeelight') body.useCt = true;
     } else if (typeof x === 'number' && typeof y === 'number') {
         body.xy = [x, y];
     }
@@ -457,6 +492,7 @@ function setUserTeamColor() {
 
     if (color.useCt && typeof ct === 'number') {
         body.ct = ct;
+        if (provider === 'yeelight') body.useCt = true;
     } else if (typeof x === 'number' && typeof y === 'number') {
         body.xy = [x, y];
     }
@@ -1110,8 +1146,10 @@ async function stopScript(apiFromMain = null) {
                 };
 
                 if (Array.isArray(prev.xy)) body.xy = prev.xy;
-                if (typeof prev.ct === 'number') body.ct = prev.ct;
-
+                if (typeof prev.ct === 'number') {
+                    body.ct = prev.ct;
+                    if (provider === 'yeelight') body.useCt = true;
+                }
                 debug(`🔋 Restored Light ${light}: ${JSON.stringify(body)}`);
                 const success = await updateLightData(light, body);
                 if (!success) {
