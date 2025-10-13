@@ -53,8 +53,21 @@ let hasLoggedBombReset = false;
 let pollerActive = false;
 let isWritingGameState = false;
 let suppressDefaultColor = false;
+let sceneEpoch = 0;
+const allowedOffUntil = new Map();
+let healthcheckMutedUntil = 0;
+let suppressSinceTs = 0;
+let keepPollingUntilTs = 0;
 
-// logic.js
+const POLL_INTERVAL_MS = () => (provider === 'yeelight' ? 25 : 100);
+const PER_LIGHT_THROTTLE_MS = () => (provider === 'hue' ? 150 : 60);
+const POST_WRITE_GAP_MS = () => (provider === 'hue' ? 80 : 40);
+
+function muteHealthcheck(ms, why = '') {
+    healthcheckMutedUntil = Date.now() + Math.max(0, ms | 0);
+    if (why) debug(`🔇 Healthcheck muted for ${ms}ms — ${why}`);
+}
+
 async function loadConfig() {
     const configPath = getConfigPath();
     const colorsFilePath = getColorsPath();
@@ -227,25 +240,118 @@ async function getLightData(light) {
 }
 
 const lightQueues = new Map();
-const MIN_GAP_MS = 60;              // small per-light pause after each PUT
-
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-async function updateLightData(light, body) {
+// Track when/what we last sent to each light (for dedupe + throttle)
+const lastUpdateAt = new Map();     // lightId -> timestamp
+const lastSentBody = new Map();     // lightId -> stable JSON string
+
+// "Intent": der gewünschte Zielzustand je Licht (stabil sortiert als String)
+const lastIntentBody = new Map(); // lightId -> stable JSON string
+
+function nearlyEqual(a, b, eps = 0.002) { // für XY-Vergleich
+    return Math.abs((a ?? 0) - (b ?? 0)) <= eps;
+}
+
+function stateMatchesIntent(deviceState, intent) {
+    if (!deviceState || !intent) return false;
+    // Hue/Yeelight kochen anders – wir prüfen nur relevante Felder robust
+    if (typeof intent.on === 'boolean' && deviceState.on !== intent.on) return false;
+    if (typeof intent.bri === 'number' && Math.abs((deviceState.bri ?? 0) - intent.bri) > 2) return false;
+
+    if (Array.isArray(intent.xy)) {
+        const sxy = Array.isArray(deviceState.xy) ? deviceState.xy : deviceState.xy || deviceState.color?.xy;
+        if (!Array.isArray(sxy) || sxy.length !== 2) return false;
+        if (!nearlyEqual(sxy[0], intent.xy[0]) || !nearlyEqual(sxy[1], intent.xy[1])) return false;
+    }
+    if (typeof intent.ct === 'number') {
+        const sct = deviceState.ct ?? deviceState.color_temp;
+        if (typeof sct !== 'number' || Math.abs(sct - intent.ct) > 2) return false;
+    }
+    return true;
+}
+
+function clearLightCaches(reason = '') {
+    lastSentBody.clear();
+    lastIntentBody.clear();
+    lastUpdateAt.clear();
+    if (reason) debug(`🧹 Cleared per-light caches: ${reason}`);
+}
+
+// Track gamestate changes to avoid unnecessary work
+let lastGamestateMTime = 0;
+
+// Stable stringify so object key order doesn't cause false mismatches
+function stableStringify(obj) {
+    if (!obj || typeof obj !== 'object') return JSON.stringify(obj);
+    const keys = Object.keys(obj).sort();
+    const ordered = {};
+    for (const k of keys) ordered[k] = obj[k];
+    return JSON.stringify(ordered);
+}
+
+async function updateLightData(light, body, opts = {}) {
+    const { force = false, verify = false, retries = 0 } = opts;
+
     if (!controller) {
         const ok = await ensureControllerReady();
-        if (!ok) {
-            error('⛔ Controller not initialized');
-            return false;
-        }
+        if (!ok) { error('⛔ Controller not initialized'); return false; }
     }
 
-    const prev = lightQueues.get(light) || Promise.resolve();
+    const intentStr = stableStringify(body);
+    lastIntentBody.set(light, intentStr);
 
+    const now = Date.now();
+    const lastAt = lastUpdateAt.get(light) || 0;
+    const alreadySent = lastSentBody.get(light) === intentStr;
+
+    if (!force) {
+        if (now - lastAt < PER_LIGHT_THROTTLE_MS()) return true;
+        if (alreadySent) return true;
+    }
+
+    // Capture current scene generation to cancel stale queued writes
+    const epochAtEnqueue = sceneEpoch;
+
+    const prev = lightQueues.get(light) || Promise.resolve();
     const next = prev.then(async () => {
+        // If scene changed while we were queued, skip this write
+        if (epochAtEnqueue !== sceneEpoch) {
+            debug(`⏭️ Skip stale write for light ${light} (scene changed)`);
+            return true;
+        }
+
+        const latestIntentStr = lastIntentBody.get(light) || intentStr;
+        const latestIntent = JSON.parse(latestIntentStr);
+
         try {
-            await controller.setState(light, body);
-            await sleep(MIN_GAP_MS);
+            await controller.setState(light, latestIntent);
+            lastUpdateAt.set(light, Date.now());
+            lastSentBody.set(light, latestIntentStr);
+            await sleep(POST_WRITE_GAP_MS());
+
+            if (verify) {
+                let attempts = 0;
+                while (attempts <= retries) {
+                    try {
+                        const st = await controller.getState(light);
+                        if (stateMatchesIntent(st, latestIntent)) return true;
+                    } catch (_) { /* ignore */ }
+                    attempts++;
+                    if (attempts <= retries) await sleep(60);
+                    // Re-send same intent (only if still same scene)
+                    if (epochAtEnqueue !== sceneEpoch) return true;
+                    try {
+                        await controller.setState(light, latestIntent);
+                        lastUpdateAt.set(light, Date.now());
+                        lastSentBody.set(light, latestIntentStr);
+                        await sleep(POST_WRITE_GAP_MS());
+                    } catch (e2) {
+                        error(`Retry setState failed for ${light}: ${e2.message}`);
+                    }
+                }
+                warn(`⚠️ Verify mismatch for light ${light} after ${retries} retries`);
+            }
             return true;
         } catch (e) {
             error(`Update failed for ${light}: ${e.message}`);
@@ -257,21 +363,25 @@ async function updateLightData(light, body) {
     return next;
 }
 
-async function sendColorToAllLights(color) {
+async function sendColorToAllLights(color, { force = true, verify = false, retries = 0 } = {}) {
     if (!color || color.enabled === false) { info("⛔ Color disabled/missing"); return; }
 
     const body = { on: true };
     if (color.useCt && typeof color.ct === 'number') {
         body.ct = color.ct;
         if (provider === 'yeelight') body.useCt = true;
-    } else if (typeof color.x === 'number' && typeof color.y === 'number') body.xy = [color.x, color.y];
+    } else if (typeof color.x === 'number' && typeof color.y === 'number') {
+        body.xy = [color.x, color.y];
+    }
     if (typeof color.bri === 'number') body.bri = color.bri;
 
-    // write with slight staggering to avoid bursts
-    for (let i = 0; i < lightIDs.length; i++) {
-        updateLightData(lightIDs[i], body);
-        await new Promise(r => setTimeout(r, 12)); // ~12ms between PUTs
-    }
+    // Barriere: wir warten bis *alle* Lichter fertig sind
+    const tasks = lightIDs.map((id, i) => (async () => {
+        // kleine Staffelung gegen Bursts
+        if (i) await sleep(12);
+        return updateLightData(id, body, { force, verify, retries });
+    })());
+    await Promise.allSettled(tasks);
 }
 
 function blinkAllLights(speed, repetition = Infinity) {
@@ -291,7 +401,7 @@ function blinkAllLights(speed, repetition = Infinity) {
 
         // fan out with a tiny stagger to avoid a PUT burst on the bridge
         for (let i = 0; i < lightIDs.length; i++) {
-            updateLightData(lightIDs[i], { on: isOn });
+            updateLightData(lightIDs[i], { on: isOn }, { force: true, verify: false });
             if (i) await new Promise(r => setTimeout(r, 8));
         }
 
@@ -309,8 +419,109 @@ function blinkAllLights(speed, repetition = Infinity) {
     return blinkEffect;
 }
 
+// --- Scene generation guard to prevent stale/racing writes ---
+function beginScene(label = '') {
+    sceneEpoch++;
+    debug(`🎬 Begin scene #${sceneEpoch}${label ? ' — ' + label : ''}`);
+    muteHealthcheck(2000, `beginScene(${label})`);
+
+    // Stop any blinking immediately
+    if (blinkEffect.length) {
+        blinkEffect.forEach(clearInterval);
+        blinkEffect = [];
+        isBlinking = false;
+    }
+
+    // Flush per-light queues by replacing them with resolved promises
+    lightQueues.forEach((_, k) => lightQueues.set(k, Promise.resolve()));
+
+    // Clear dedupe/throttle caches so the next intents are not skipped
+    clearLightCaches(`beginScene(${label})`);
+    allowedOffUntil.clear();
+}
+
+// Optional helper: verify after a short delay and fix any mismatches
+async function assertAllLights(body, { delayMs = 120, retries = 1 } = {}) {
+    await sleep(delayMs);
+    const intentStr = stableStringify(body);
+    await Promise.all(lightIDs.map(async (id) => {
+        try {
+            const st = await getLightData(id);
+            if (!stateMatchesIntent(st, body)) {
+                debug(`🔁 Assert resend on light ${id}`);
+                await updateLightData(id, JSON.parse(intentStr), { force: true, verify: true, retries });
+            }
+        } catch (_) { /* ignore */ }
+    }));
+}
+
+// Generic setter with layered fallbacks for many-light setups.
+async function applyColorWithFallback(color, label = 'generic') {
+    if (!color || color.enabled === false) { info("⛔ Color disabled/missing"); return; }
+
+    // Capture the scene at call time; if it changes, abort later steps
+    const plannedEpoch = sceneEpoch;
+
+    // Small helper: bail if an effect started or scene changed
+    const shouldAbort = (why = '') => {
+        if (sceneEpoch !== plannedEpoch) { debug(`⏭️ Abort fallback (${label}) — scene changed ${why||''}`); return true; }
+        if (isFading || suppressColorUntilNextRound) { debug(`⏭️ Abort fallback (${label}) — effect/suppression active ${why||''}`); return true; }
+        return false;
+    };
+
+    // Build expected state we want to see on lights
+    const expect = { on: true };
+    if (color.useCt && typeof color.ct === 'number') {
+        expect.ct = color.ct;
+        if (provider === 'yeelight') expect.useCt = true; // yeelight flag
+    } else if (typeof color.x === 'number' && typeof color.y === 'number') {
+        expect.xy = [color.x, color.y];
+    }
+    if (typeof color.bri === 'number') expect.bri = color.bri;
+
+    debug(`🎨 Applying ${label} color with layered fallback...`);
+
+    // Primary send with per-light verify
+    await sendColorToAllLights(color, { force: true, verify: true, retries: 2 });
+    if (shouldAbort('(after primary)')) return;
+
+    // Group-level assertion (slightly larger delay & retries)
+    await assertAllLights(expect, { delayMs: 180, retries: 2 });
+    if (shouldAbort('(after assert)')) return;
+
+    // Final targeted sweep: re-send only mismatched lights
+    await sleep(160); // settle a bit
+    if (shouldAbort('(before sweep)')) return;
+
+    const mismatches = [];
+    for (const id of lightIDs) {
+        try {
+            const st = await getLightData(id);
+            if (!stateMatchesIntent(st, expect)) mismatches.push(id);
+        } catch { /* ignore */ }
+        // Check mid-loop to abort quickly if a new scene/effect starts
+        if (shouldAbort('(mid sweep)')) return;
+    }
+
+    if (mismatches.length) {
+        debug(`🔁 Final sweep for lights: ${mismatches.join(', ')}`);
+        for (let i = 0; i < mismatches.length; i++) {
+            if (shouldAbort('(sweep loop)')) return;
+            const id = mismatches[i];
+            if (i) await sleep(20); // gentle stagger
+            await updateLightData(id, expect, { force: true, verify: true, retries: 1 });
+        }
+        // One last short assert (guarded)
+        if (!shouldAbort('(pre last assert)')) {
+            await assertAllLights(expect, { delayMs: 120, retries: 1 });
+        }
+    }
+}
+
 function changeAllBrightness(value) {
-    return Promise.all(lightIDs.map(light => updateLightData(light, { on: true, bri: value })));
+    return Promise.all(lightIDs.map(light =>
+        updateLightData(light, { on: true, bri: value }, { force: true, verify: false })
+    ));
 }
 
 function resetBombState() {
@@ -339,6 +550,7 @@ function resetBombState() {
 }
 
 async function bombPlanted() {
+    beginScene('bomb:planted');
     const initialTime = colors.bomb?.initialTime || 40;
     bombCountdown = initialTime;
 
@@ -356,6 +568,11 @@ async function bombPlanted() {
         }
 
         await sendColorToAllLights(color);
+        await assertAllLights(
+            (color.useCt ? { on: true, ct: color.ct, ...(typeof color.bri === 'number' ? { bri: color.bri } : {}) }
+                : { on: true, xy: [color.x, color.y], ...(typeof color.bri === 'number' ? { bri: color.bri } : {}) }),
+            { delayMs: 160, retries: 1 }
+        );
     } else {
         info("⛔ Bomb color is disabled or missing");
     }
@@ -447,7 +664,9 @@ async function bombPlanted() {
 }
 
 async function bombExploded() {
+    beginScene('bomb:exploded');
     debug("💥 Bomb exploded!");
+    keepPollingUntilTs = Date.now() + 8000;
 
     if (timer) {
         clearInterval(timer);
@@ -463,15 +682,49 @@ async function bombExploded() {
     info("💥 BOOM");
 
     if (colors.exploded) {
-        await sendColorToAllLights(colors.exploded);
+        await sendColorToAllLights(colors.exploded, { force: true, verify: true, retries: 2 });
+        await assertAllLights(
+            (colors.exploded.useCt
+                ? { on: true, ct: colors.exploded.ct, ...(typeof colors.exploded.bri === 'number' ? { bri: colors.exploded.bri } : {}) }
+                : { on: true, xy: [colors.exploded.x, colors.exploded.y], ...(typeof colors.exploded.bri === 'number' ? { bri: colors.exploded.bri } : {}) }),
+            { delayMs: 160, retries: 1 }
+        );
     }
 
     delayWinLossColor = true;
     setTimeout(() => delayWinLossColor = false, 2000);
+
+    // Failover Round End
+    setTimeout(async () => {
+        // If we already applied a result, bail.
+        if (roundEnded) return;
+        // Prefer the actual winner from GSI (if present), otherwise default to T after explosion
+        const winner = gameState?.round?.win_team || 'T';
+        info(`🏁 Applying round result after explosion (fallback → ${winner})`);
+        try {
+            await applyRoundResultByWinner(winner, 'explode-fallback');
+        } catch (e) {
+            error(`❌ Fallback round result after explosion failed: ${e.message}`);
+        }
+    }, 1800);
+
+    setTimeout(() => {
+        // If no result has been applied by now, force apply one
+        if (!roundEnded) {
+            const winner = gameState?.round?.win_team || 'T';
+            info(`🧯 Watchdog: forcing round result after explosion (${winner})`);
+            applyRoundResultByWinner(winner, 'explode-watchdog')
+                .catch(e => error(`❌ Watchdog apply failed: ${e.message}`));
+        } else {
+            resumeRoundIfStuck('post-result');
+        }
+    }, 6000);
 }
 
 async function bombDefused() {
+    beginScene('bomb:defused');
     debug("🛡 Handling bomb defused...");
+    keepPollingUntilTs = Date.now() + 8000;
 
     if (timer) {
         clearInterval(timer);
@@ -487,11 +740,108 @@ async function bombDefused() {
     info("🛡 Bomb has been defused");
 
     if (colors.defused) {
-        await sendColorToAllLights(colors.defused);
+        await sendColorToAllLights(colors.defused, { force: true, verify: true, retries: 2 });
+        await assertAllLights(
+            (colors.defused.useCt
+                ? { on: true, ct: colors.defused.ct, ...(typeof colors.defused.bri === 'number' ? { bri: colors.defused.bri } : {}) }
+                : { on: true, xy: [colors.defused.x, colors.defused.y], ...(typeof colors.defused.bri === 'number' ? { bri: colors.defused.bri } : {}) }),
+            { delayMs: 160, retries: 1 }
+        );
     }
 
     delayWinLossColor = true;
     setTimeout(() => delayWinLossColor = false, 2000);
+
+    // Failover Round End
+    setTimeout(async () => {
+        // If we already applied a result, bail.
+        if (roundEnded) return;
+        // Prefer actual GSI winner; otherwise CT after defuse
+        const winner = gameState?.round?.win_team || 'CT';
+        info(`🏁 Applying round result after defuse (fallback → ${winner})`);
+        try {
+            await applyRoundResultByWinner(winner, 'defuse-fallback');
+        } catch (e) {
+            error(`❌ Fallback round result after defuse failed: ${e.message}`);
+        }
+    }, 1800);
+
+    setTimeout(() => {
+        // If no result has been applied by now, force apply one
+        if (!roundEnded) {
+            const winner = gameState?.round?.win_team || 'CT';
+            info(`🧯 Watchdog: forcing round result after explosion (${winner})`);
+            applyRoundResultByWinner(winner, 'explode-watchdog')
+                .catch(e => error(`❌ Watchdog apply failed: ${e.message}`));
+        } else {
+            resumeRoundIfStuck('post-result');
+        }
+    }, 6000);
+}
+
+async function applyRoundResultByWinner(winningTeam, reason = 'fallback') {
+    if (roundEnded) return;
+    roundEnded = true;
+    suppressColorUntilNextRound = true;
+    suppressSinceTs = Date.now();
+    delayWinLossColor = false;
+
+    // Check win against own team
+    const playerTeam = gameState.player?.team;
+    const isWin = playerTeam && winningTeam && playerTeam === winningTeam;
+    const color = isWin ? colors.win : colors.lose;
+    if (!color) return;
+
+    beginScene(`round:${isWin ? 'win' : 'lose'} (${reason})`);
+    isFading = true;
+
+    await sendColorToAllLights(color, { force: true, verify: true, retries: 2 });
+    await assertAllLights(
+        (color.useCt
+            ? { on: true, ct: color.ct, ...(typeof color.bri === 'number' ? { bri: color.bri } : {}) }
+            : { on: true, xy: [color.x, color.y], ...(typeof color.bri === 'number' ? { bri: color.bri } : {}) }),
+        { delayMs: 160, retries: 1 }
+    );
+
+    await Promise.all(lightIDs.map(light => fadeOutLight(light, 5000)));
+    isFading = false;
+    hasLoggedFadeWarning = false;
+
+    forEachLight(light => updateLightData(light, { on: true }));
+
+    // Make sure that no blink is running
+    if (blinkEffect.length) {
+        blinkEffect.forEach(clearInterval);
+        blinkEffect = [];
+        isBlinking = false;
+    }
+}
+
+function resumeRoundIfStuck(reason = 'watchdog') {
+    if (!suppressColorUntilNextRound || !roundEnded) return;
+    if (!suppressSinceTs || (Date.now() - suppressSinceTs) < 4500) return;
+
+    info(`🧯 Forcing round resume (${reason})`);
+    muteHealthcheck(2500, `resume (${reason})`);
+
+    roundEnded = false;
+    suppressColorUntilNextRound = false;
+    suppressSinceTs = 0;
+    explodedHandled = false;
+    defusedHandled = false;
+    hasLoggedBombReset = false;
+
+    clearLightCaches(`resume(${reason})`);
+    resetBombState();
+
+    const team = gameState?.player?.team;
+    if (team && colors[team]) {
+        setUserTeamColor();
+        lastColorMode = team;
+    } else {
+        setDefaultColor();
+        lastColorMode = 'default';
+    }
 }
 
 function setDefaultColor() {
@@ -512,6 +862,7 @@ function setDefaultColor() {
         return;
     }
 
+    beginScene('default');
     const color = colors.default;
     if (!color || color.enabled === false) {
         info("⛔ Default color is disabled or missing");
@@ -534,7 +885,8 @@ function setDefaultColor() {
         body.bri = bri;
     }
 
-    forEachLight(light => updateLightData(light, body));
+    forEachLight(light => updateLightData(light, body, { force: true, verify: false }));
+    assertAllLights(body, { delayMs: 140, retries: 1 });
 }
 
 function setUserTeamColor() {
@@ -549,6 +901,8 @@ function setUserTeamColor() {
         info(`⛔ Team color for "${userTeam}" is disabled or missing`);
         return;
     }
+
+    beginScene(`team:${userTeam}`);
 
     const { x, y, ct, bri, on = true } = color;
     const body = { on };
@@ -565,7 +919,10 @@ function setUserTeamColor() {
     }
 
     info(`🎨 Sending color to lights for team ${userTeam}: ${JSON.stringify(body)}`);
-    forEachLight(light => updateLightData(light, body));
+    applyColorWithFallback(
+        (color.useCt ? { ...color, useCt: true } : color),
+        `team:${userTeam}`
+    );
 }
 
 async function startScript() {
@@ -606,7 +963,6 @@ async function startScript() {
         }
     } else {
         info("🟡 Yeelight mode: skipping Hue bridge checks.");
-        // Optional: später Discovery/Reachability Checks für Yeelight ergänzen.
     }
 
     const host = config.SERVER_HOST || '127.0.0.1';
@@ -615,7 +971,6 @@ async function startScript() {
     server = http.createServer((req, res) => {
         const url = require('url');
 
-        // Inside your server:
         const parsedUrl = url.parse(req.url);
         const pathname = parsedUrl.pathname;
 
@@ -638,6 +993,7 @@ async function startScript() {
             }
             return;
         }
+
         // Favicon
         if (req.method === 'GET' && pathname.startsWith('/img/favicon/')) {
             const safePath = pathname.replace(/^\/+/, '');
@@ -772,6 +1128,9 @@ async function startScript() {
         info(`🟢 Server listening on http://${host}:${port}`);
     });
 
+    // Lights could be off, so mute health check for a second
+    muteHealthcheck(4000, 'startup');
+
     // Save previous state
     try {
         const states = await Promise.all(lightIDs.map(getLightData));
@@ -804,9 +1163,39 @@ async function startScript() {
 async function pollLoop() {
     if (!pollerActive) return;
 
-    await handlePoll();
+    let shouldPoll = true;
 
-    setTimeout(pollLoop, 200);
+    // Cheap file mtime check to avoid heavy work if nothing changed.
+    // Still poll when bomb effects need timing (blink/timer), since they don’t always depend on file updates.
+    try {
+        const stat = fs.statSync(getGamestatePath());
+        const changed = stat.mtimeMs !== lastGamestateMTime;
+        // Keep polling while we are in any transitional state:
+        // - suppressColorUntilNextRound: waiting for round resume
+        // - roundEnded: end-of-round scene just applied
+        // - isBombPlanted / isBlinking: time-driven effects
+        // Otherwise we can safely skip when the file hasn't changed.
+        if (
+            !changed &&
+            !isBombPlanted &&
+            !isBlinking &&
+            !roundEnded &&
+            !suppressColorUntilNextRound && Date.now() > keepPollingUntilTs
+        ) {
+            shouldPoll = false;
+        } else {
+            lastGamestateMTime = stat.mtimeMs;
+        }
+    } catch {
+        // If we can’t stat the file, fall back to normal handling (handlePoll has its own retry logic)
+        shouldPoll = true;
+    }
+
+    if (shouldPoll) {
+        await handlePoll();
+    }
+
+    setTimeout(pollLoop, POLL_INTERVAL_MS());
 }
 
 async function handlePoll() {
@@ -897,11 +1286,13 @@ async function handlePoll() {
             resetBombState();
 
             if (colors.menu) {
-                await sendColorToAllLights(colors.menu);
+                await applyColorWithFallback(colors.menu, 'menu');
                 lastColorMode = "menu";
             } else {
                 warn("⚠️ Menu color is disabled or not defined in colors.json");
             }
+            // Discord RPC Text
+            if (config?.DISCORD_EVENTS?.menu !== false) sendRpc('Menu');
         }
 
         return;
@@ -915,11 +1306,13 @@ async function handlePoll() {
 
             const warmupColor = colors.warmup;
             if (warmupColor && warmupColor.enabled !== false) {
-                await sendColorToAllLights(warmupColor);
+                await applyColorWithFallback(colors.warmup, 'warmup');
                 lastColorMode = "warmup";
             } else {
                 warn("⚠️ Warmup color is disabled or not defined in colors.json");
             }
+            // Discord RPC Text
+            if (config?.DISCORD_EVENTS?.roundStart !== false) sendRpc('Warmup', { resetTimer: true });
         }
         return;
     }
@@ -937,6 +1330,8 @@ async function handlePoll() {
             isBombPlanted = true;
             await bombPlanted();
             info("💣 Bomb has been planted");
+            // Discord Text
+            if (config?.DISCORD_EVENTS?.bombPlanted !== false) sendRpc('Planted');
         }
 
         if (gameState.round.bomb === "exploded" && !isBombExploded && !explodedHandled) {
@@ -949,6 +1344,8 @@ async function handlePoll() {
             } catch (err) {
                 error(`❌ Error in bombExploded(): ${err.message}`);
             }
+            // Discord Text
+            if (config?.DISCORD_EVENTS?.bombExploded !== false) sendRpc('Exploded');
         }
 
         if (gameState.round.bomb === "defused" && !isBombDefused && !defusedHandled) {
@@ -961,6 +1358,8 @@ async function handlePoll() {
             } catch (err) {
                 error(`❌ Error in bombDefused(): ${err.message}`);
             }
+            // Discord Text
+            if (config?.DISCORD_EVENTS?.bombDefused !== false) sendRpc('Defused');
         }
     }
 
@@ -969,12 +1368,17 @@ async function handlePoll() {
         if (roundEnded || suppressColorUntilNextRound) {
             info("🔄 New round started, resuming color logic");
 
+            muteHealthcheck(2500, 'round resumed');
+            keepPollingUntilTs = 0;
+
             roundEnded = false;
             suppressColorUntilNextRound = false;
+            suppressSinceTs = 0;
             explodedHandled = false;
             defusedHandled = false;
             hasLoggedBombReset = false;
 
+            clearLightCaches('round resumed');
             resetBombState();
 
             const team = gameState?.player?.team;
@@ -985,13 +1389,20 @@ async function handlePoll() {
                 setDefaultColor();
                 lastColorMode = 'default';
             }
+            // Discord Text
+            if (config?.DISCORD_EVENTS?.roundStart !== false) sendRpc('RoundStart', { resetTimer: !!config.DISCORD_RESET_ON_ROUND });
         }
     }
 
     // 🟨 Team/default color logic (only skip *after* reset check)
     if (!gameState.round || !gameState.round.bomb || gameState.round.bomb === "none") {
-        if (suppressColorUntilNextRound) return;
-
+        if (suppressColorUntilNextRound) {
+            if (suppressSinceTs && (Date.now() - suppressSinceTs) > 5000) {
+                warn("⏲️ Suppression expired — resuming colors (no gamestate update).");
+                resumeRoundIfStuck('team/default');
+            }
+            return;
+        }
         const team = gameState?.player?.team;
 
         if (team && colors[team]) {
@@ -1000,7 +1411,7 @@ async function handlePoll() {
                 setUserTeamColor();
                 lastColorMode = team;
             }
-            hasLoggedMissingPlayerWarning = false; //
+            hasLoggedMissingPlayerWarning = false;
         } else {
             if (!gameState.player) {
                 if (!hasLoggedMissingPlayerWarning) {
@@ -1043,8 +1454,15 @@ async function handlePoll() {
         if (playerTeam && playerTeam === winningTeam) {
             info("🏆 Round won! Showing win color");
             if (colors.win) {
+                beginScene('round:win');
                 isFading = true;
-                await sendColorToAllLights(colors.win);
+                await sendColorToAllLights(colors.win, { force: true, verify: true, retries: 2 });
+                await assertAllLights(
+                    (colors.win.useCt
+                        ? { on: true, ct: colors.win.ct, ...(typeof colors.win.bri === 'number' ? { bri: colors.win.bri } : {}) }
+                        : { on: true, xy: [colors.win.x, colors.win.y], ...(typeof colors.win.bri === 'number' ? { bri: colors.win.bri } : {}) }),
+                    { delayMs: 160, retries: 1 }
+                );
                 await Promise.all(lightIDs.map(light => fadeOutLight(light, 5000)));
                 // Delay Healthcheck
                 //setTimeout(() => {
@@ -1053,19 +1471,26 @@ async function handlePoll() {
 
                 forEachLight(light => updateLightData(light, { on: true }));
 
-                // Stop any rogue blinking
                 if (blinkEffect.length) {
                     blinkEffect.forEach(clearInterval);
                     blinkEffect = [];
                     isBlinking = false;
                 }
-                //}, 4000);
+                // Discord Text
+                if (config?.DISCORD_EVENTS?.roundWon !== false) sendRpc('RoundWon');
             }
         } else {
             info("💀 Round lost.");
             if (colors.lose) {
+                beginScene('round:lose');
                 isFading = true;
-                await sendColorToAllLights(colors.lose);
+                await sendColorToAllLights(colors.lose, { force: true, verify: true, retries: 2 });
+                await assertAllLights(
+                    (colors.lose.useCt
+                        ? { on: true, ct: colors.lose.ct, ...(typeof colors.lose.bri === 'number' ? { bri: colors.lose.bri } : {}) }
+                        : { on: true, xy: [colors.lose.x, colors.lose.y], ...(typeof colors.lose.bri === 'number' ? { bri: colors.lose.bri } : {}) }),
+                    { delayMs: 160, retries: 1 }
+                );
                 await Promise.all(lightIDs.map(light => fadeOutLight(light, 5000)));
                 // Delay Healthcheck
                 isFading = false;
@@ -1079,6 +1504,8 @@ async function handlePoll() {
                     blinkEffect = [];
                     isBlinking = false;
                 }
+                // Discord Text
+                if (config?.DISCORD_EVENTS?.roundLost !== false) sendRpc('RoundLost');
             }
         }
     }
@@ -1087,6 +1514,7 @@ async function handlePoll() {
     if (gameState.round?.phase !== "over") {
         if (roundEnded || suppressColorUntilNextRound) {
             info("🔄 New round started, resuming color logic");
+            muteHealthcheck(2500, 'round resumed (failsafe)');
 
             roundEnded = false;
             suppressColorUntilNextRound = false;
@@ -1094,6 +1522,7 @@ async function handlePoll() {
             // Reset explosion flag AFTER round reset
             isBombExploded = false;
 
+            clearLightCaches('round resumed (failsafe)');
             // Force lights to turn on again
             forEachLight(light => updateLightData(light, { on: true }));
 
@@ -1105,13 +1534,32 @@ async function handlePoll() {
                 setDefaultColor();
                 lastColorMode = 'default';
             }
+            // Discord Text
+            if (config?.DISCORD_EVENTS?.roundStart !== false) sendRpc('RoundStart', { resetTimer: !!config.DISCORD_RESET_ON_ROUND });
         }
     }
-    if (!isFading && !isBlinking && !isBombPlanted && Date.now() - lastHealthCheck > 2000) {
+    if (!isFading && !isBlinking && !isBombPlanted && !suppressColorUntilNextRound &&
+        Date.now() >= healthcheckMutedUntil && Date.now() - lastHealthCheck > 2000) {
         lastHealthCheck = Date.now();
         await Promise.all(lightIDs.map(async (light) => {
             const state = await getLightData(light);
-            if (state && !state.on) {
+            if (state && state.on === false) {
+
+                const intentStr = lastIntentBody.get(light);
+                if (intentStr) {
+                    try {
+                        const intent = JSON.parse(intentStr);
+                        if (intent && intent.on === false) return;
+                    } catch { }
+                }
+                const grace = allowedOffUntil.get(light) || 0;
+                if (Date.now() <= grace) {
+                    return;
+                }
+                const lastAt = lastUpdateAt.get(light) || 0;
+                if (Date.now() - lastAt < 900) {
+                    return;
+                }
                 info(`⚠️ Light ${light} is off unexpectedly. Re-enabling.`);
                 await updateLightData(light, { on: true, bri: 100 });
             }
@@ -1132,6 +1580,7 @@ async function fadeOutLight(light, duration = 1000, steps = 10) {
 
             currentStep++;
             if (currentStep >= steps) {
+                allowedOffUntil.set(light, Date.now() + Math.max(800, duration + 500));
                 updateLightData(light, { on: false });
                 clearInterval(interval);
                 resolve();
@@ -1178,7 +1627,7 @@ async function stopScript(apiFromMain = null) {
         isBlinking = false;
     }
 
-    // 🧠 Restore previous light state or turn lights off
+    // Restore previous light state or turn lights off
     if (fs.existsSync(getPreviousStatePath())) {
         try {
             debug("📂 PreviousStatePath exists");
@@ -1244,6 +1693,7 @@ function resetInternalFlags() {
     isBombDefused = false;
     roundEnded = false;
     suppressColorUntilNextRound = false;
+    suppressSinceTs = 0;
     isFading = false;
     isBlinking = false;
     hasLoggedFadeWarning = false;
@@ -1349,6 +1799,147 @@ async function probeHueBridge(bridgeIP, apiKey) {
     if (!last.ok) throw new Error(`Bridge returned HTTP ${last.status}`);
 }
 
+function getIpc() {
+    try {
+        if (typeof window !== 'undefined' && window?.process?.type === 'renderer') {
+            const { ipcRenderer } = require('electron');
+            return ipcRenderer;
+        }
+    } catch (_) { }
+    return null;
+}
+
+// Optionales Sanitizing (bleibt, auch wenn keine User-Eingaben mehr genutzt werden)
+function sanitizeText(s) {
+    if (!s) return '';
+    return String(s).slice(0, 96);
+}
+
+function labelForMode(mode) {
+    if (!mode) return '';
+    if (/wingman/i.test(mode)) return 'Wingman';
+    if (/deathmatch/i.test(mode)) return 'Deathmatch';
+    if (/casual/i.test(mode)) return 'Casual';
+    return 'Competitive';
+}
+
+function sideLabel(team) {
+    if (!team) return '';
+    const t = String(team).toUpperCase();
+    if (t === 'CT') return 'CT';
+    if (t === 'T') return 'T';
+    return t;
+}
+
+function buildFixedLines(gs) {
+    const map = gs?.map?.name || '';
+    const mode = gs?.map?.mode || '';
+    const side = sideLabel(gs?.player?.team || '');
+    const ct = gs?.map?.team_ct?.score;
+    const t = gs?.map?.team_t?.score;
+
+    const parts1 = [];
+    const modeLabel = labelForMode(mode);
+    if (modeLabel) parts1.push(modeLabel);
+    if (map) parts1.push(map);
+
+    const ot = detectOT(mode, ct, t);
+    if (ot > 0) parts1[parts1.length - 1] = `${parts1[parts1.length - 1]} (OT${ot})`;
+
+    const detailsStr = parts1.join(' — ').trim();
+    const details = detailsStr ? sanitizeText(detailsStr) : undefined;
+
+    let state;
+    if (side && Number.isFinite(ct) && Number.isFinite(t)) {
+        const enemy = side === 'CT' ? 'T' : 'CT';
+        const teamScore = side === 'CT' ? ct : t;
+        const enemyScore = side === 'CT' ? t : ct;
+        state = `In Team ${side} ${teamScore} - ${enemyScore} ${enemy}`;
+    } else if (side) {
+        state = `In Team ${side}`;
+    }
+
+    return { details, state: state ? sanitizeText(state) : undefined };
+}
+
+function detectOT(mode, ctScore, tScore) {
+    const baseMax = /wingman/i.test(mode) ? 16 : 24;
+    const total = (ctScore ?? 0) + (tScore ?? 0);
+    if (total <= baseMax) return 0;
+    const extra = Math.max(1, total - baseMax);
+    return Math.floor((extra - 1) / 6) + 1;
+}
+
+function computeParty(gs) {
+    const round = gs?.map?.round ?? gs?.round?.round;
+    const mode = gs?.map?.mode;
+    const baseMax = /wingman/i.test(mode) ? 16 : 24;
+
+    const ct = gs?.map?.team_ct?.score ?? 0;
+    const t = gs?.map?.team_t?.score ?? 0;
+    const otN = detectOT(mode, ct, t);
+    const rounds_max = baseMax + otN * 6;
+
+    if (!Number.isFinite(round)) return null;
+    return [Number(round) || 0, rounds_max];
+}
+
+let lastRpcSent = 0;
+function sendRpc({ resetTimer = false } = {}) {
+    try {
+        if (!config?.DISCORD_RPC_ENABLED) return;
+
+        if (!resetTimer && Date.now() - lastRpcSent < 900) return;
+
+        const ipc = getIpc();
+        if (!ipc) return;
+
+        const lines = buildFixedLines(gameState);
+        const partial = {
+            details: lines.details,
+            state: lines.state,
+            showElapsed: config.DISCORD_SHOW_ELAPSED === true, // <- wichtig
+            resetTimer: !!resetTimer
+        };
+
+        const party = config.DISCORD_USE_PARTY ? computeParty(gameState) : null;
+        if (party) partial.partySize = party;
+
+        ipc.send('rpc-update', partial);
+        lastRpcSent = Date.now();
+    } catch (_) { }
+}
+
+// --- Runtime reload of config + colors (no full restart required) ---
+async function reloadRuntimeConfig() {
+    try {
+        await loadConfig();
+        clearLightCaches('reloadRuntimeConfig');
+
+        if (!isRunning) {
+            info('🔁 Runtime config/colors reloaded (script is not running).');
+            return true;
+        }
+
+        if (!isBombPlanted && !isBlinking && !isFading && !suppressColorUntilNextRound) {
+            const team = gameState?.player?.team;
+            if (team && colors[team]) {
+                setUserTeamColor();
+                lastColorMode = team;
+            } else {
+                setDefaultColor();
+                lastColorMode = 'default';
+            }
+        }
+
+        info('✅ Runtime config/colors reloaded and applied.');
+        return true;
+    } catch (e) {
+        error(`❌ reloadRuntimeConfig failed: ${e.message}`);
+        return false;
+    }
+}
+
 module.exports = {
     startScript,
     stopScript,
@@ -1360,4 +1951,5 @@ module.exports = {
     anyLightInSyncMode,
     getLightData,
     updateLightData,
+    reloadRuntimeConfig
 };

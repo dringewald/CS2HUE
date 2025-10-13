@@ -885,3 +885,28 @@ button.oldborder {
     padding-bottom: 6px;
     border-bottom: 2px solid var(--border-color);
 }
+
+#discordDisplay {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 15px;
+    margin-top: 10px;
+    max-width: calc((180px + 15px) * 5);
+    margin-left: auto;
+    margin-right: auto;
+    width: 100%;
+}
+
+@media (min-width: 1200px) {
+    #discordDisplay {
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        max-width: calc((220px + 15px) * 5);
+    }
+}
+
+@media (min-width: 1600px) {
+    #discordDisplay {
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        max-width: calc((260px + 15px) * 5);
+    }
+}

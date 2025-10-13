@@ -1,7 +1,7 @@
 const { info, warn, error, debug, setHtmlLogEnabled, setDebugMode, setRendererLogFunction, setMaxSessionLines, initializeLogger } = require('./logger');
 const { startScript, stopScript, isScriptRunning, anyLightInSyncMode, getHueAPI } = require('./logic.js');
 const { setBasePath, getConfigPath, getColorsPath, getBackupPath } = require('./paths');
-const { migrateMissingColors } = require('./migrator');
+const { migrateMissingColors, migrateConfig } = require('./migrator');
 const { ipcRenderer } = require('electron');
 const HueBridgeHelper = require('./hueBridgeHelper');
 const fs = require('fs');
@@ -16,6 +16,13 @@ ipcRenderer.on('set-light-ids', (event, ids) => {
     lightIDs = ids;
     lightIDsReady = true;  // Mark lightIDs as ready
     debug("🔧 lightIDs set in renderer:", lightIDs);
+});
+
+ipcRenderer.on('log-line', (_e, message) => {
+    const logBox = document.getElementById('log');
+    if (!logBox) return;
+    logBox.textContent += message + '\n';
+    logBox.scrollTop = logBox.scrollHeight;
 });
 
 ipcRenderer.on('reset-lights', async () => {
@@ -72,10 +79,16 @@ window.addEventListener('DOMContentLoaded', async () => {
     await setupPaths(defaultConfigPath, defaultColorsPath);
     initializeLogger();
 
-    // Migrate missing color fields
+    // Migrate missing color and Discord config fields
     migrateMissingColors();
-
+    migrateConfig();
     initializeApp();
+
+    // renderer.js — global
+    window.addEventListener('focus', () => {
+        const v = document.getElementById('discordRpcToggle')?.value;
+        if (v === 'true') ipcRenderer.send('rpc-bump');
+    });
 });
 
 function sanitizeColorObject(obj) {
@@ -505,16 +518,45 @@ function initializeApp() {
             document.getElementById('debugMode').value = config.DEBUG_MODE ? 'true' : 'false';
             debug('debugMode field value:', document.getElementById('debugMode').value);
             document.getElementById('liveLogNumber').value = config.LIVE_LOG_LINES || 1000;
-            debug('liveLogNumber field value:', document.getElementById('liveLogNumber').value);         
+            debug('liveLogNumber field value:', document.getElementById('liveLogNumber').value);
             document.getElementById('provider').value = (config.PROVIDER || 'hue');
             debug('provider field value:', document.getElementById('provider').value);
             document.getElementById('yeelightDiscovery').value = String(config.YEELIGHT_DISCOVERY === true);
             debug('yeelightDiscovery field value:', document.getElementById('yeelightDiscovery').value);
             document.getElementById('yeelightDevices').value = config.YEELIGHT_DEVICES || '';
-            
+
+            // Discord settings
+            const setVal = (id, v) => { const el = document.getElementById(id); if (el) el.value = String(v); };
+
+            setVal('discordShowElapsed', config.DISCORD_SHOW_ELAPSED === true);
+            setVal('discordUseParty', config.DISCORD_USE_PARTY === true);
+            setVal('discordResetOnRound', config.DISCORD_RESET_ON_ROUND === true);
+            document.getElementById('discordUpdateRate').value = config.DISCORD_UPDATE_RATE ?? 15;
+
+            const setChecked = (id, val) => {
+                const el = document.getElementById(id);
+                if (el) el.checked = val;
+            };
+
+            const ev = config.DISCORD_EVENTS || {};
+            document.getElementById('rpcEvt_menu').checked = ev.menu !== false;
+            document.getElementById('rpcEvt_roundStart').checked = ev.roundStart !== false;
+            document.getElementById('rpcEvt_bombPlanted').checked = ev.bombPlanted !== false;
+            document.getElementById('rpcEvt_bombDefused').checked = ev.bombDefused !== false;
+            document.getElementById('rpcEvt_bombExploded').checked = ev.bombExploded !== false;
+            document.getElementById('rpcEvt_roundWon').checked = ev.roundWon !== false;
+            document.getElementById('rpcEvt_roundLost').checked = ev.roundLost !== false;
+
+            // Discord RPC Toggle (select)
+            const rpcToggle = document.getElementById('discordRpcToggle');
+            if (rpcToggle) {
+                rpcToggle.value = String(config.DISCORD_RPC_ENABLED === true);
+                debug('discordRpcToggle field value:', rpcToggle.value);
+            }
+
             applyProviderVisibility();
             info("🔧 Loaded config.json");
-            
+
         } catch (err) {
             error(`❌ Failed to parse config.json: ${err.message}`);
         }
@@ -549,11 +591,25 @@ function initializeApp() {
             SERVER_PORT: parseInt(document.getElementById('serverPort').value) || 8080,
             LIGHT_ID: document.getElementById('lightIds').value,
             SHOW_BOMB_TIMER: document.getElementById('showTimer').value === 'true',
+            DISCORD_RPC_ENABLED: document.getElementById('discordRpcToggle')?.value === 'true',
             HTML_LOG: document.getElementById('htmlLog').value === 'true',
             DEBUG_MODE: document.getElementById('debugMode').value === 'true',
             LIVE_LOG_LINES: document.getElementById('liveLogNumber').value || 1000,
             YEELIGHT_DISCOVERY: document.getElementById('yeelightDiscovery').value === 'true',
-            YEELIGHT_DEVICES: document.getElementById('yeelightDevices').value || ''
+            YEELIGHT_DEVICES: document.getElementById('yeelightDevices').value || '',
+            DISCORD_SHOW_ELAPSED: document.getElementById('discordShowElapsed').value === 'true',
+            DISCORD_USE_PARTY: document.getElementById('discordUseParty').value === 'true',
+            DISCORD_RESET_ON_ROUND: document.getElementById('discordResetOnRound').value === 'true',
+            DISCORD_UPDATE_RATE: parseInt(document.getElementById('discordUpdateRate').value) || 15,
+            DISCORD_EVENTS: {
+                menu: document.getElementById('rpcEvt_menu').checked,
+                roundStart: document.getElementById('rpcEvt_roundStart').checked,
+                bombPlanted: document.getElementById('rpcEvt_bombPlanted').checked,
+                bombDefused: document.getElementById('rpcEvt_bombDefused').checked,
+                bombExploded: document.getElementById('rpcEvt_bombExploded')?.checked ?? true,
+                roundWon: document.getElementById('rpcEvt_roundWon').checked,
+                roundLost: document.getElementById('rpcEvt_roundLost').checked
+            },
         };
 
         fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 4));
@@ -591,6 +647,10 @@ function initializeApp() {
         info("▶️ Starting bomb script...");
         const success = await startScript();
 
+        if (document.getElementById('discordRpcToggle')?.value === 'true') {
+            ipcRenderer.send('rpc-toggle', true);
+        }
+
         scriptIsStarting = false;
         scriptIsRunning = !!success;
         ipcRenderer.send('set-script-running', scriptIsRunning);
@@ -624,6 +684,8 @@ function initializeApp() {
 
         await stopScript(getHueAPI());
 
+        ipcRenderer.send('rpc-toggle', false);
+
         scriptIsRunning = false;
         scriptIsStopping = false;
         ipcRenderer.send('set-script-running', false);
@@ -632,38 +694,72 @@ function initializeApp() {
         info("✅ Script stopped!");
     });
 
-    document.getElementById('reloadConfig').addEventListener('click', () => {
+    document.getElementById('reloadConfig').addEventListener('click', async () => {
         info("🔁 Reloading Settings...");
+        // Reload UI + Files
         reloadSettings();
+
+        try {
+            const { reloadRuntimeConfig, startScript, stopScript, isScriptRunning, getHueAPI } = require('./logic.js');
+
+            if (isScriptRunning()) {
+                const fs = require('fs');
+                const { getConfigPath } = require('./paths');
+                const fresh = JSON.parse(fs.readFileSync(getConfigPath(), 'utf-8'));
+
+                const criticalChanged =
+                    true;
+
+                if (criticalChanged) {
+                    info("♻️ Applying config to running script via safe restart...");
+                    setScriptControlsEnabled(false);
+                    await stopScript(getHueAPI());
+                    const ok = await startScript();
+                    setScriptControlsEnabled(true);
+                    if (!ok) warn("⚠️ Restart after reload failed.");
+                } else {
+                    await reloadRuntimeConfig();
+                }
+            } else {
+                await require('./logic.js').reloadRuntimeConfig();
+            }
+        } catch (e) {
+            error(`❌ Failed to apply reload at runtime: ${e.message}`);
+        }
+
+        info("✅ Reload completed and applied.");
     });
 
     document.getElementById('restartScript').addEventListener('click', async () => {
-        if (isTestingColor) {
-            warn("🚫 Cannot restart script while color test is active.");
-            return;
-        }
-        if (scriptIsStarting || scriptIsStopping) {
-            warn("⚠️ Script is busy. Please wait...");
-            return;
-        }
-
+        if (isTestingColor) { warn("🚫 Cannot restart script while color test is active."); return; }
+        if (scriptIsStarting || scriptIsStopping) { warn("⚠️ Script is busy. Please wait..."); return; }
+      
         setScriptControlsEnabled(false);
         info("🔁 Restarting Script...");
-
+      
+        const wantRpc = document.getElementById('discordRpcToggle')?.value === 'true';
+        if (wantRpc) ipcRenderer.send('rpc-toggle', false);
+      
         scriptIsStopping = true;
         await stopScript(getHueAPI());
-        scriptIsRunning = false;
         scriptIsStopping = false;
-
+        scriptIsRunning = false;
+      
+        await new Promise(r => setTimeout(r, 200));
+      
         scriptIsStarting = true;
         const success = await startScript();
-        scriptIsRunning = !!success;
         scriptIsStarting = false;
-
+        scriptIsRunning = !!success;
+      
+        if (success && wantRpc) {
+          setTimeout(() => ipcRenderer.send('rpc-toggle', true), 150);
+        }
+      
         ipcRenderer.send('set-script-running', scriptIsRunning);
         updateLogButtonVisibility();
         setScriptControlsEnabled(true);
-    });
+      });      
 
     document.getElementById('openLogBtn').addEventListener('click', () => {
         const serverHost = document.getElementById('serverHost').value || '127.0.0.1';
@@ -802,7 +898,7 @@ function initializeApp() {
             populateLightsUI(groupedLights, allLights);
             modal.style.display = 'flex';
 
-            // ✅ ADD event listeners after UI is ready
+            // ADD event listeners after UI is ready
             confirmBtn.onclick = () => {
                 const checked = [...document.querySelectorAll('.modal-checkbox input:checked')]
                     .map(cb => cb.value)
@@ -1286,7 +1382,7 @@ function loadColors() {
             const config = JSON.parse(fs.readFileSync(getConfigPath(), 'utf-8'));
             const provider = (config.PROVIDER || 'hue').toLowerCase();
             const ids = (config.LIGHT_ID || '').split(',').map(s => s.trim()).filter(Boolean);
-        
+
             // === STOP CASE (second click on the same color) ===
             if (isTestingColor && testedColorName === name) {
                 try {
@@ -1311,7 +1407,7 @@ function loadColors() {
                 } catch (e) {
                     error(`❌ Failed to restore previous state: ${e.message}`);
                 }
-        
+
                 info(`🔙 Stopped testing "${name}"`);
                 isTestingColor = false;
                 testedColorName = null;
@@ -1320,29 +1416,29 @@ function loadColors() {
                 ipcRenderer.send('color-test-status', isTestingColor);
                 return;
             }
-        
+
             // Prevent parallel tests
             if (isTestingColor) {
                 warn(`⚠️ Already testing "${testedColorName}". Stop that first.`);
                 return;
             }
-        
+
             // Do not allow testing while the main script is running
             if (isScriptRunning()) {
                 info("🚫 Cannot test while script is running.");
                 return;
             }
-        
+
             if (ids.length === 0) {
                 warn("⚠️ No LIGHT_ID configured.");
                 return;
             }
-        
+
             // Expose light IDs globally (used by other parts of the app)
             lightIDs = ids;
             lightIDsReady = true;
             ipcRenderer.send('set-light-ids', ids);
-        
+
             // === YEELIGHT PATH ===
             if (provider === 'yeelight') {
                 // 1) Snapshot current state (best effort; controller may return minimal info)
@@ -1357,7 +1453,7 @@ function loadColors() {
                         return;
                     }
                 }
-        
+
                 // 2) Build the desired color/state body from the source function
                 const color = await colorSourceFn();
                 const body = { on: true, bri: color.bri ?? 200 };
@@ -1366,7 +1462,7 @@ function loadColors() {
                 } else if (typeof color.x === 'number' && typeof color.y === 'number') {
                     body.xy = [color.x, color.y];
                 }
-        
+
                 // 3) Apply via controller IPC
                 for (const id of ids) {
                     try {
@@ -1375,22 +1471,22 @@ function loadColors() {
                         error(`❌ Failed to set yeelight color on ${id}: ${err.message}`);
                     }
                 }
-        
+
                 // 4) Update UI/testing state
                 isTestingColor = true;
                 testedColorName = name;
                 testSavedButton.textContent = '⛔ Stop Test';
                 testLiveButton.textContent = '⛔ Stop Test';
                 ipcRenderer.send('color-test-status', isTestingColor);
-        
+
                 // No periodic watchdog for Yeelight (optional to add later)
                 return;
             }
-        
+
             // === HUE PATH ===
             const hueAPI = `http://${config.BRIDGE_IP}/api/${config.API_KEY}`;
             ipcRenderer.send('set-hue-api', hueAPI);
-        
+
             // Hue-only: check for entertainment/sync mode to avoid conflicts
             const inSync = await anyLightInSyncMode(ids, hueAPI);
             if (inSync) {
@@ -1402,7 +1498,7 @@ function loadColors() {
                 ipcRenderer.send('color-test-status', isTestingColor);
                 return;
             }
-        
+
             // Snapshot current Hue state for later restoration
             previousStateCache = {};
             for (const id of ids) {
@@ -1416,7 +1512,7 @@ function loadColors() {
                     return;
                 }
             }
-        
+
             // Build the state payload from the provided color source
             const color = await colorSourceFn();  // Get color dynamically
             const body = { on: true, bri: color.bri ?? 200 };
@@ -1425,7 +1521,7 @@ function loadColors() {
             } else if (typeof color.x === 'number' && typeof color.y === 'number') {
                 body.xy = [color.x, color.y];
             }
-        
+
             // Apply to Hue via REST
             for (const id of ids) {
                 try {
@@ -1439,20 +1535,20 @@ function loadColors() {
                     error(`❌ Failed to set color on light ${id}: ${err.message}`);
                 }
             }
-        
+
             // Update UI/testing state and start a simple connectivity watchdog for Hue
             isTestingColor = true;
             testedColorName = name;
             testSavedButton.textContent = '⛔ Stop Test';
             testLiveButton.textContent = '⛔ Stop Test';
             ipcRenderer.send('color-test-status', isTestingColor);
-        
+
             let watchdogInterval = setInterval(async () => {
                 if (!isTestingColor) {
                     clearInterval(watchdogInterval);
                     return;
                 }
-        
+
                 try {
                     for (const id of ids) {
                         const res = await fetch(`${hueAPI}/lights/${id}`);
@@ -1473,7 +1569,7 @@ function loadColors() {
                     clearInterval(watchdogInterval);
                 }
             }, 3000);
-        }        
+        }
 
         // Button Events
         testSavedButton.addEventListener('click', () =>
@@ -1509,53 +1605,53 @@ function loadColors() {
 
 async function restorePreviousLightState() {
     if (!previousStateCache || !fs.existsSync(getConfigPath())) return;
-  
+
     const config = JSON.parse(fs.readFileSync(getConfigPath(), 'utf-8'));
     const provider = (config.PROVIDER || 'hue').toLowerCase();
     const ids = (config.LIGHT_ID || '').split(',').map(id => id.trim()).filter(Boolean);
-  
+
     if (provider === 'yeelight') {
-      // Restore via controller (IPC)
-      for (const id of ids) {
-        const prev = previousStateCache[id];
-        if (!prev) continue;
-        const body = {};
-        if (typeof prev.on === 'boolean') body.on = prev.on;
-        if (typeof prev.bri === 'number') body.bri = prev.bri;
-        if (Array.isArray(prev.xy)) body.xy = prev.xy;
-        if (typeof prev.ct === 'number') { body.ct = prev.ct; body.useCt = true; }
-        try {
-          await ipcRenderer.invoke('controller-set-state', { id, body });
-        } catch (err) {
-          error(`❌ Failed to restore Yeelight ${id}: ${err.message}`);
+        // Restore via controller (IPC)
+        for (const id of ids) {
+            const prev = previousStateCache[id];
+            if (!prev) continue;
+            const body = {};
+            if (typeof prev.on === 'boolean') body.on = prev.on;
+            if (typeof prev.bri === 'number') body.bri = prev.bri;
+            if (Array.isArray(prev.xy)) body.xy = prev.xy;
+            if (typeof prev.ct === 'number') { body.ct = prev.ct; body.useCt = true; }
+            try {
+                await ipcRenderer.invoke('controller-set-state', { id, body });
+            } catch (err) {
+                error(`❌ Failed to restore Yeelight ${id}: ${err.message}`);
+            }
         }
-      }
     } else {
-      // Hue path (wie zuvor)
-      ipcRenderer.send('set-light-ids', ids);
-      const hueAPI = `http://${config.BRIDGE_IP}/api/${config.API_KEY}`;
-      for (const id of ids) {
-        const prev = previousStateCache[id];
-        if (!prev) continue;
-        const body = { on: prev.on, bri: prev.bri };
-        if (prev.xy) body.xy = prev.xy;
-        if (typeof prev.ct === 'number') body.ct = prev.ct;
-  
-        try {
-          const response = await fetch(`${hueAPI}/lights/${id}/state`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body)
-          });
-          if (!response.ok) throw new Error(`HTTP ${response.status} - ${response.statusText}`);
-        } catch (err) {
-          error(`❌ Failed to restore light ${id} state: ${err.message}`);
+        // Hue path (wie zuvor)
+        ipcRenderer.send('set-light-ids', ids);
+        const hueAPI = `http://${config.BRIDGE_IP}/api/${config.API_KEY}`;
+        for (const id of ids) {
+            const prev = previousStateCache[id];
+            if (!prev) continue;
+            const body = { on: prev.on, bri: prev.bri };
+            if (prev.xy) body.xy = prev.xy;
+            if (typeof prev.ct === 'number') body.ct = prev.ct;
+
+            try {
+                const response = await fetch(`${hueAPI}/lights/${id}/state`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                if (!response.ok) throw new Error(`HTTP ${response.status} - ${response.statusText}`);
+            } catch (err) {
+                error(`❌ Failed to restore light ${id} state: ${err.message}`);
+            }
         }
-      }
     }
-  
+
     previousStateCache = {};
-  }  
+}
 
 document.getElementById('saveColors').addEventListener('click', () => {
     const inputs = document.querySelectorAll('#colorsDisplay input');
@@ -1767,6 +1863,12 @@ function reloadSettings() {
     document.getElementById('provider').value = (savedConfig.PROVIDER || 'hue');
     document.getElementById('yeelightDiscovery').value = String(savedConfig.YEELIGHT_DISCOVERY === true);
     document.getElementById('yeelightDevices').value = savedConfig.YEELIGHT_DEVICES || '';
+
+    // neu (robust):
+    const rpcToggle = document.getElementById('discordRpcToggle');
+    if (rpcToggle) {
+        rpcToggle.value = String(savedConfig.DISCORD_RPC_ENABLED === true);
+    }
 
     setDebugMode(savedConfig.DEBUG_MODE);
     setHtmlLogEnabled(savedConfig.HTML_LOG);

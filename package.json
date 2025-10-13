@@ -60,6 +60,7 @@
     }
   },
   "dependencies": {
-    "cs2hue": "file:"
+    "cs2hue": "file:",
+    "discord-rpc": "^4.0.1"
   }
 }

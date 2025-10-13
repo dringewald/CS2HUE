@@ -72,7 +72,11 @@ function setRendererLogFunction(fn) {
 function createLog(level, ...args) {
     const timestamp = getFormattedTimestamp();
     const message = `[${level}] ${timestamp} | ${args.join(' ')}`;
-    console.log(message);
+
+    const isRenderer = typeof window !== 'undefined' && window?.process?.type === 'renderer';
+    if (isRenderer) {
+        console.log(message);
+    }
 
     if (renderLogFunction) {
         renderLogFunction(message);
@@ -148,7 +152,7 @@ function appendToHtmlLog(rawMessage) {
 
     sessionLogLines.push(logLine);
     if (sessionLogLines.length > MAX_SESSION_LINES) {
-        sessionLogLines.shift(); // remove the oldest line
+        sessionLogLines.shift();
     }
 
     if (!HTML_LOG_ENABLED) return;
@@ -427,6 +431,8 @@ function setMaxSessionLines(value) {
     }
 }
 
+function setIpcBridge(fn) { renderLogFunction = fn; pendingLogs.splice(0).forEach(m => renderLogFunction(m)); }
+
 module.exports = {
     info,
     warn,
@@ -438,5 +444,6 @@ module.exports = {
     setHtmlLogEnabled,
     clearSessionLog,
     setMaxSessionLines,
-    initializeLogger
+    initializeLogger,
+    setIpcBridge
 };

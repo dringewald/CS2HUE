@@ -1,23 +1,26 @@
 const { ipcMain, powerSaveBlocker, app, BrowserWindow, shell } = require('electron');
 const { stopScript, isScriptRunning, setIsRunning, setLightIDs, setHueAPI, getHueAPI } = require('./logic');
-const { info, warn, debug, error } = require('./logger');
+const { info, warn, debug, error, initializeLogger, setIpcBridge } = require('./logger');
 const { setBasePath } = require('./paths');
+const DiscordRPC = require('./discordRPC');
+
 app.commandLine.appendSwitch('no-timers-throttle');
 let win;
 let isTestingColor = false;
 let cleanupDone = false;
 let currentHueAPI = null;
+let blockerId;
 
-ipcMain.on('color-test-status', (event, status) => {
+ipcMain.on('color-test-status', (status) => {
     isTestingColor = status;
 });
 
-ipcMain.on('set-light-ids', (event, ids) => {
+ipcMain.on('set-light-ids', (ids) => {
     lightIDs = ids;
     setLightIDs(ids);
 });
 
-ipcMain.on('set-script-running', (event, status) => {
+ipcMain.on('set-script-running', (status) => {
     setIsRunning(status);
 });
 
@@ -28,7 +31,7 @@ ipcMain.handle('get-is-packaged', () => {
     return app.isPackaged;
 });
 
-ipcMain.handle('open-folder', async (event, folderPath) => {
+ipcMain.handle('open-folder', async (folderPath) => {
     try {
         await shell.openPath(folderPath);
         return true;
@@ -42,7 +45,7 @@ ipcMain.on('lights-reset-complete', () => {
     resetLightsDone = true;
 });
 
-ipcMain.on('set-hue-api', (event, api) => {
+ipcMain.on('set-hue-api', (api) => {
     currentHueAPI = api;
     setHueAPI(api);
 });
@@ -54,7 +57,7 @@ ipcMain.on('stop-script', async () => {
     await stopScript();
 });
 
-ipcMain.handle('controller-get-state', async (event, { id }) => {
+ipcMain.handle('controller-get-state', async ({ id }) => {
     const logic = require('./logic');
     if (typeof logic.getLightData === 'function') {
         return await logic.getLightData(id);
@@ -62,7 +65,7 @@ ipcMain.handle('controller-get-state', async (event, { id }) => {
     return {};
 });
 
-ipcMain.handle('controller-set-state', async (event, { id, body }) => {
+ipcMain.handle('controller-set-state', async ({ id, body }) => {
     const logic = require('./logic');
     if (typeof logic.updateLightData === 'function') {
         return await logic.updateLightData(id, body);
@@ -70,8 +73,22 @@ ipcMain.handle('controller-set-state', async (event, { id, body }) => {
     return false;
 });
 
-let blockerId;
+ipcMain.on('rpc-toggle', (_e, enabled) => {
+    debug(`[Discord] rpc-toggle received: ${enabled}`);
+    if (enabled) DiscordRPC.startRPC();
+    else DiscordRPC.stopRPC();
+});
 
+ipcMain.on('rpc-bump', () => DiscordRPC.discordBump());
+
+ipcMain.on('rpc-update', (_e, partial) => {
+    try { DiscordRPC.updatePresence(partial || {}); } catch { }
+});
+
+process.on('unhandledRejection', (reason) => {
+    error("⚠️ UnhandledPromiseRejection:", (reason && reason.stack) || reason);
+});
+ 
 function createWindow() {
     win = new BrowserWindow({
         width: 800,
@@ -110,7 +127,7 @@ app.whenReady().then(async () => {
             : __dirname;
 
         setBasePath(userDataPath);
-
+        initializeLogger();
         createWindow();
 
         win.on('close', (event) => {
@@ -182,6 +199,7 @@ app.on('before-quit', async (event) => {
         }
         await stopScript(currentHueAPI);
     }
+    try { DiscordRPC.stopRPC(); } catch { }
 
     cleanupDone = true;
     app.quit();
@@ -195,4 +213,8 @@ app.on('window-all-closed', async () => {
     if (process.platform !== 'darwin') {
         app.quit();
     }
+});
+
+setIpcBridge((msg) => {
+    if (win && !win.isDestroyed()) win.webContents.send('log-line', msg);
 });

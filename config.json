@@ -1,14 +1,28 @@
 {
     "PROVIDER": "hue",
-    "BRIDGE_IP": "192.168.1.10",
-    "API_KEY": "YOUR_API_KEY_HERE",
+    "BRIDGE_IP": "",
+    "API_KEY": "",
     "SERVER_HOST": "127.0.0.1",
     "SERVER_PORT": 8080,
-    "LIGHT_ID": "0, 1, 2",
+    "LIGHT_ID": "",
     "SHOW_BOMB_TIMER": false,
     "HTML_LOG": false,
     "DEBUG_MODE": false,
     "LIVE_LOG_LINES": 1000,
     "YEELIGHT_DISCOVERY": false,
-    "YEELIGHT_DEVICES": ""
+    "YEELIGHT_DEVICES": "",
+    "DISCORD_RPC_ENABLED": false,
+    "DISCORD_SHOW_ELAPSED": true,
+    "DISCORD_USE_PARTY": true,
+    "DISCORD_RESET_ON_ROUND": false,
+    "DISCORD_UPDATE_RATE": 15,
+    "DISCORD_EVENTS": {
+        "menu": true,
+        "roundStart": true,
+        "bombPlanted": true,
+        "bombDefused": true,
+        "bombExploded": true,
+        "roundWon": true,
+        "roundLost": true
+    }
 }

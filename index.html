@@ -83,7 +83,7 @@
         <option value="false">Disabled</option>
         <option value="true">Enabled</option>
       </select>
-    
+
       <label>Yeelight Devices (host[:port], comma-separated):</label>
       <input type="text" id="yeelightDevices" placeholder="192.168.0.21:55443, 192.168.0.22" />
     </div>
@@ -123,6 +123,14 @@
       <option value="false">Disabled</option>
     </select>
 
+    <div class="row">
+      <label for="discordRpcToggle" title="Discord Rich Presence anzeigen">Discord RPC</label>
+      <select id="discordRpcToggle" title="Enable or disable Discord Rich Presence integration.">
+        <option value="true">Enabled</option>
+        <option value="false">Disabled</option>
+      </select>
+    </div>
+
     <label>HTML Logfile:</label>
     <select id="htmlLog"
       title="If true, saves the full session log into an HTML file under /logs/. Useful for debugging.">
@@ -156,6 +164,138 @@
     <button class="oldborder" id="saveBombSettings">💾 Save Bomb Stages</button>
   </div>
 
+  <!-- Discord Presence Config -->
+  <div class="section" id="discordPresenceSection"
+    style="margin-top:12px; border-top:1px solid #333; padding-top:12px;">
+    <h3>🎮 Discord Presence</h3>
+
+    <div class="row">
+      <label for="discordShowElapsed" title="Show Discord's elapsed timer (startTimestamp)">Show Elapsed Timer</label>
+      <select id="discordShowElapsed">
+        <option value="true">Enabled</option>
+        <option value="false">Disabled</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <label for="discordUseParty" title="Use the 'party size' line to show Round X/Y">Round Line via Party Size</label>
+      <select id="discordUseParty">
+        <option value="true">Enabled</option>
+        <option value="false">Disabled</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <label for="discordResetOnRound" title="Restart elapsed timer each round start">Reset Timer on Round Start</label>
+      <select id="discordResetOnRound">
+        <option value="false">No</option>
+        <option value="true">Yes</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <label for="discordUpdateRate" title="How often we re-assert presence (seconds)">Presence Update Rate (s)</label>
+      <input type="number" id="discordUpdateRate" class="secret-input visible" min="5" max="60" placeholder="15" />
+    </div>
+
+    <h4 style="margin-top:10px">📣 Which events update Discord?</h4>
+
+    <!-- Use the same toggle UI pattern as color "enabled" switches -->
+    <div class="events-toggle-list" id="discordDisplay">
+      <!-- In Menu -->
+      <div class="enabled-wrapper">
+        <div class="toggle-container">
+          <span class="toggle-wrapper">
+            <span class="toggle-text">In Menu</span>
+            <label class="toggle-switch">
+              <!-- Keep the same ID for JS compatibility -->
+              <input type="checkbox" id="rpcEvt_menu" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </span>
+        </div>
+      </div>
+
+      <!-- Round Start -->
+      <div class="enabled-wrapper">
+        <div class="toggle-container">
+          <span class="toggle-wrapper">
+            <span class="toggle-text">Round Start</span>
+            <label class="toggle-switch">
+              <input type="checkbox" id="rpcEvt_roundStart" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </span>
+        </div>
+      </div>
+
+      <!-- Bomb Planted -->
+      <div class="enabled-wrapper">
+        <div class="toggle-container">
+          <span class="toggle-wrapper">
+            <span class="toggle-text">Bomb Planted</span>
+            <label class="toggle-switch">
+              <input type="checkbox" id="rpcEvt_bombPlanted" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </span>
+        </div>
+      </div>
+
+      <!-- Bomb Defused -->
+      <div class="enabled-wrapper">
+        <div class="toggle-container">
+          <span class="toggle-wrapper">
+            <span class="toggle-text">Bomb Defused</span>
+            <label class="toggle-switch">
+              <input type="checkbox" id="rpcEvt_bombDefused" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </span>
+        </div>
+      </div>
+
+      <!-- Bomb Exploded -->
+      <div class="enabled-wrapper">
+        <div class="toggle-container">
+          <span class="toggle-wrapper">
+            <span class="toggle-text">Bomb Exploded</span>
+            <label class="toggle-switch">
+              <input type="checkbox" id="rpcEvt_bombExploded" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </span>
+        </div>
+      </div>
+
+      <!-- Round Won -->
+      <div class="enabled-wrapper">
+        <div class="toggle-container">
+          <span class="toggle-wrapper">
+            <span class="toggle-text">Round Won</span>
+            <label class="toggle-switch">
+              <input type="checkbox" id="rpcEvt_roundWon" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </span>
+        </div>
+      </div>
+
+      <!-- Round Lost -->
+      <div class="enabled-wrapper">
+        <div class="toggle-container">
+          <span class="toggle-wrapper">
+            <span class="toggle-text">Round Lost</span>
+            <label class="toggle-switch">
+              <input type="checkbox" id="rpcEvt_roundLost" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </span>
+        </div>
+      </div>
+    </div>
+  </div>
+  
   <div class="section" id="controlButtons">
     <button id="startScript">▶️ Start Script</button>
     <button id="stopScript">⏹ Stop Script</button>
