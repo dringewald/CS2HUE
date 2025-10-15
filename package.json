@@ -1,6 +1,6 @@
 {
   "name": "cs2hue",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Control Hue and Yeelight Lights with CS2",
   "main": "main.js",
   "author": {
@@ -19,10 +19,6 @@
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder"
-  },
-  "devDependencies": {
-    "electron": "^36.1.0",
-    "electron-builder": "^26.0.15"
   },
   "build": {
     "appId": "de.dringewald.cs2hue",
@@ -62,5 +58,9 @@
   "dependencies": {
     "cs2hue": "file:",
     "discord-rpc": "^4.0.1"
+  },
+  "devDependencies": {
+    "electron": "^38.3.0",
+    "electron-builder": "^26.0.12"
   }
 }
