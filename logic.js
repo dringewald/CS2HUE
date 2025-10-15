@@ -243,19 +243,19 @@ const lightQueues = new Map();
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 // Track when/what we last sent to each light (for dedupe + throttle)
-const lastUpdateAt = new Map();     // lightId -> timestamp
-const lastSentBody = new Map();     // lightId -> stable JSON string
+const lastUpdateAt = new Map();
+const lastSentBody = new Map();
 
-// "Intent": der gewünschte Zielzustand je Licht (stabil sortiert als String)
-const lastIntentBody = new Map(); // lightId -> stable JSON string
+// “Intent”: the desired target state for each light (sorted as a stable string)
+const lastIntentBody = new Map();
 
-function nearlyEqual(a, b, eps = 0.002) { // für XY-Vergleich
+function nearlyEqual(a, b, eps = 0.002) {
     return Math.abs((a ?? 0) - (b ?? 0)) <= eps;
 }
 
 function stateMatchesIntent(deviceState, intent) {
     if (!deviceState || !intent) return false;
-    // Hue/Yeelight kochen anders – wir prüfen nur relevante Felder robust
+    // Hue/Yeelight are working differently – we only check relevant fields robustly
     if (typeof intent.on === 'boolean' && deviceState.on !== intent.on) return false;
     if (typeof intent.bri === 'number' && Math.abs((deviceState.bri ?? 0) - intent.bri) > 2) return false;
 
@@ -375,9 +375,9 @@ async function sendColorToAllLights(color, { force = true, verify = false, retri
     }
     if (typeof color.bri === 'number') body.bri = color.bri;
 
-    // Barriere: wir warten bis *alle* Lichter fertig sind
+    // Barrier: we wait until *all* lights are ready
     const tasks = lightIDs.map((id, i) => (async () => {
-        // kleine Staffelung gegen Bursts
+        // small staggering against bursts
         if (i) await sleep(12);
         return updateLightData(id, body, { force, verify, retries });
     })());
@@ -419,7 +419,7 @@ function blinkAllLights(speed, repetition = Infinity) {
     return blinkEffect;
 }
 
-// --- Scene generation guard to prevent stale/racing writes ---
+// Scene generation guard to prevent stale/racing writes
 function beginScene(label = '') {
     sceneEpoch++;
     debug(`🎬 Begin scene #${sceneEpoch}${label ? ' — ' + label : ''}`);
@@ -440,7 +440,7 @@ function beginScene(label = '') {
     allowedOffUntil.clear();
 }
 
-// Optional helper: verify after a short delay and fix any mismatches
+// Verify after a short delay and fix any mismatches
 async function assertAllLights(body, { delayMs = 120, retries = 1 } = {}) {
     await sleep(delayMs);
     const intentStr = stableStringify(body);
@@ -462,10 +462,10 @@ async function applyColorWithFallback(color, label = 'generic') {
     // Capture the scene at call time; if it changes, abort later steps
     const plannedEpoch = sceneEpoch;
 
-    // Small helper: bail if an effect started or scene changed
+    // Bail if an effect started or scene changed
     const shouldAbort = (why = '') => {
-        if (sceneEpoch !== plannedEpoch) { debug(`⏭️ Abort fallback (${label}) — scene changed ${why||''}`); return true; }
-        if (isFading || suppressColorUntilNextRound) { debug(`⏭️ Abort fallback (${label}) — effect/suppression active ${why||''}`); return true; }
+        if (sceneEpoch !== plannedEpoch) { debug(`⏭️ Abort fallback (${label}) — scene changed ${why || ''}`); return true; }
+        if (isFading || suppressColorUntilNextRound) { debug(`⏭️ Abort fallback (${label}) — effect/suppression active ${why || ''}`); return true; }
         return false;
     };
 
@@ -490,7 +490,7 @@ async function applyColorWithFallback(color, label = 'generic') {
     if (shouldAbort('(after assert)')) return;
 
     // Final targeted sweep: re-send only mismatched lights
-    await sleep(160); // settle a bit
+    await sleep(160);
     if (shouldAbort('(before sweep)')) return;
 
     const mismatches = [];
@@ -508,7 +508,8 @@ async function applyColorWithFallback(color, label = 'generic') {
         for (let i = 0; i < mismatches.length; i++) {
             if (shouldAbort('(sweep loop)')) return;
             const id = mismatches[i];
-            if (i) await sleep(20); // gentle stagger
+            // gentle stagger
+            if (i) await sleep(20);
             await updateLightData(id, expect, { force: true, verify: true, retries: 1 });
         }
         // One last short assert (guarded)
@@ -618,7 +619,7 @@ async function bombPlanted() {
         bombCountdown--;
 
         if ([30, 20, 12, 5, 2].includes(bombCountdown)) {
-            // 🛑 Abort if round ended
+            // Abort if round ended
             if (roundEnded || suppressColorUntilNextRound) {
                 debug(`⛔ Ignoring stage logic at ${bombCountdown}s — new round already started.`);
                 return;
@@ -696,20 +697,34 @@ async function bombExploded() {
 
     // Failover Round End
     setTimeout(async () => {
-        // If we already applied a result, bail.
         if (roundEnded) return;
-        // Prefer the actual winner from GSI (if present), otherwise default to T after explosion
-        const winner = gameState?.round?.win_team || 'T';
-        info(`🏁 Applying round result after explosion (fallback → ${winner})`);
+
+        const hasRealWinner = !!gameState?.round?.win_team;
+        const winner = hasRealWinner ? gameState.round.win_team : 'T';
+
         try {
             await applyRoundResultByWinner(winner, 'explode-fallback');
+
+            const playerTeam = gameState?.player?.team;
+
+            // Logging logic
+            if (hasRealWinner) {
+                if (playerTeam && playerTeam === winner) {
+                    info("🏆 Round won! Showing win color");
+                } else {
+                    info("💀 Round lost.");
+                }
+            } else {
+                // Only log fallback if GSI had no result
+                info(`🏁 Applying round result after explosion (fallback → ${winner})`);
+            }
         } catch (e) {
             error(`❌ Fallback round result after explosion failed: ${e.message}`);
         }
     }, 1800);
 
+    // If no result has been applied by now, force apply one
     setTimeout(() => {
-        // If no result has been applied by now, force apply one
         if (!roundEnded) {
             const winner = gameState?.round?.win_team || 'T';
             info(`🧯 Watchdog: forcing round result after explosion (${winner})`);
@@ -753,14 +768,29 @@ async function bombDefused() {
     setTimeout(() => delayWinLossColor = false, 2000);
 
     // Failover Round End
+    // Failover Round End
     setTimeout(async () => {
-        // If we already applied a result, bail.
         if (roundEnded) return;
-        // Prefer actual GSI winner; otherwise CT after defuse
-        const winner = gameState?.round?.win_team || 'CT';
-        info(`🏁 Applying round result after defuse (fallback → ${winner})`);
+
+        const hasRealWinner = !!gameState?.round?.win_team;
+        const winner = hasRealWinner ? gameState.round.win_team : 'CT';
+
         try {
             await applyRoundResultByWinner(winner, 'defuse-fallback');
+
+            const playerTeam = gameState?.player?.team;
+
+            // Logging logic
+            if (hasRealWinner) {
+                if (playerTeam && playerTeam === winner) {
+                    info("🏆 Round won! Showing win color");
+                } else {
+                    info("💀 Round lost.");
+                }
+            } else {
+                // Only log fallback if GSI had no result
+                info(`🏁 Applying round result after defuse (fallback → ${winner})`);
+            }
         } catch (e) {
             error(`❌ Fallback round result after defuse failed: ${e.message}`);
         }
@@ -1170,7 +1200,7 @@ async function pollLoop() {
     try {
         const stat = fs.statSync(getGamestatePath());
         const changed = stat.mtimeMs !== lastGamestateMTime;
-        // Keep polling while we are in any transitional state:
+        // Keep polling while the lights are in any transitional state:
         // - suppressColorUntilNextRound: waiting for round resume
         // - roundEnded: end-of-round scene just applied
         // - isBombPlanted / isBlinking: time-driven effects
@@ -1187,7 +1217,7 @@ async function pollLoop() {
             lastGamestateMTime = stat.mtimeMs;
         }
     } catch {
-        // If we can’t stat the file, fall back to normal handling (handlePoll has its own retry logic)
+        // If the file can't be stat, fall back to normal handling (handlePoll has its own retry logic)
         shouldPoll = true;
     }
 
@@ -1319,11 +1349,12 @@ async function handlePoll() {
 
     if (gameState.round) {
         if ((!gameState.round.bomb || gameState.round.bomb === "none") && isBombPlanted) {
+            // Give a small grace period before resetting bomb state
             setTimeout(() => {
                 if (!gameState.round?.bomb || gameState.round.bomb === "none") {
                     resetBombState();
                 }
-            }, 500); // Give a small grace period before resetting
+            }, 500);
         }
 
         if (gameState.round?.bomb === "planted" && !isBombPlanted) {
@@ -1465,7 +1496,6 @@ async function handlePoll() {
                 );
                 await Promise.all(lightIDs.map(light => fadeOutLight(light, 5000)));
                 // Delay Healthcheck
-                //setTimeout(() => {
                 isFading = false;
                 hasLoggedFadeWarning = false;
 
@@ -1809,7 +1839,7 @@ function getIpc() {
     return null;
 }
 
-// Optionales Sanitizing (bleibt, auch wenn keine User-Eingaben mehr genutzt werden)
+// Optional sanitizing (remains even if no user input is used anymore)
 function sanitizeText(s) {
     if (!s) return '';
     return String(s).slice(0, 96);

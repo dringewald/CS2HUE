@@ -86,9 +86,14 @@ ipcMain.on('rpc-update', (_e, partial) => {
 });
 
 process.on('unhandledRejection', (reason) => {
+    const msg = (reason && (reason.message || reason)) + '';
+    if (msg && msg.includes('connection closed')) {
+        // Discord RPC is being shutdown –  ignore message.
+        return;
+    }
     error("⚠️ UnhandledPromiseRejection:", (reason && reason.stack) || reason);
 });
- 
+
 function createWindow() {
     win = new BrowserWindow({
         width: 800,

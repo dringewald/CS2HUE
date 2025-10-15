@@ -14,7 +14,7 @@ let scriptIsStopping = false;
 
 ipcRenderer.on('set-light-ids', (event, ids) => {
     lightIDs = ids;
-    lightIDsReady = true;  // Mark lightIDs as ready
+    lightIDsReady = true;
     debug("🔧 lightIDs set in renderer:", lightIDs);
 });
 
@@ -84,7 +84,6 @@ window.addEventListener('DOMContentLoaded', async () => {
     migrateConfig();
     initializeApp();
 
-    // renderer.js — global
     window.addEventListener('focus', () => {
         const v = document.getElementById('discordRpcToggle')?.value;
         if (v === 'true') ipcRenderer.send('rpc-bump');
@@ -101,8 +100,6 @@ function sanitizeColorObject(obj) {
 }
 
 function showLightSelectionModal(lightList, options = {}) {
-    // --- helpers --------------------------------------------------------------
-
     // Ensure all required DOM nodes exist; create missing ones exactly once.
     function ensureScaffold() {
         const modal = document.getElementById('lightSelectionModal');
@@ -137,7 +134,6 @@ function showLightSelectionModal(lightList, options = {}) {
         let tabContent = content.querySelector('.tab-content');
 
         if (!tabContainer || !tabContent) {
-            // We won't fabricate our own tab UI anymore; just warn if missing.
             warn('⚠️ Missing .tab-container/.tab-content in modal HTML.');
         }
 
@@ -153,11 +149,11 @@ function showLightSelectionModal(lightList, options = {}) {
         [...content.querySelectorAll('#groupedTab')].slice(1).forEach(n => n.remove());
         [...content.querySelectorAll('#allTab')].slice(1).forEach(n => n.remove());
 
-        // Re-resolve after cleanup (in case we removed duplicates)
+        // Re-resolve after cleanup
         tabContainer = content.querySelector('.tab-container');
         tabContent = content.querySelector('.tab-content');
 
-        // Lists (these are inside the panes in your HTML)
+        // Lists
         const groupedList = content.querySelector('#groupedLightsList');
         const allList = content.querySelector('#allLightsList');
 
@@ -170,7 +166,7 @@ function showLightSelectionModal(lightList, options = {}) {
             content.appendChild(legacyList);
         }
 
-        // --- Footer action buttons (create only if missing) -----------------------
+        // Footer action buttons (create only if missing)
         let confirmBtn = content.querySelector('#confirmLightSelection');
         let cancelBtn = content.querySelector('#cancelLightSelection');
         if (!confirmBtn && !cancelBtn) {
@@ -185,7 +181,7 @@ function showLightSelectionModal(lightList, options = {}) {
             cancelBtn = footer.querySelector('#cancelLightSelection');
         }
 
-        // --- Wire tab switching once (idempotent, scoped to this modal) -----------
+        // Wire tab switching once (idempotent, scoped to this modal)
         if (tabContainer && tabContent) {
             tabContainer.querySelectorAll('.tab-btn').forEach(btn => {
                 if (btn._wired) return;            // avoid double binding
@@ -280,11 +276,8 @@ function showLightSelectionModal(lightList, options = {}) {
         wrap.appendChild(selectAllBtn);
         wrap.appendChild(deselectAllBtn);
 
-        // Insert right before the grouped list section (good default anchor)
         anchorEl.parentElement.insertBefore(wrap, anchorEl);
     }
-
-    // --- main logic -----------------------------------------------------------
 
     const scaffold = ensureScaffold();
     if (!scaffold) return;
@@ -342,7 +335,6 @@ function showLightSelectionModal(lightList, options = {}) {
     content.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
 
     if (isGrouped) {
-        // ----- grouped: { roomName: [{id,name}, ...], ... } -----
         for (const [groupName, lights] of Object.entries(lightList)) {
             const section = document.createElement('div');
             section.className = 'room-section';
@@ -372,7 +364,6 @@ function showLightSelectionModal(lightList, options = {}) {
         groupedBtn?.classList.add('active');
         groupedPaneEl?.classList.add('active');
     } else {
-        // ----- flat: [{id,name}, ...] -----
         lightList.forEach(light => allList.appendChild(renderCheckbox(light)));
 
         // Default to All tab
@@ -399,7 +390,7 @@ function showLightSelectionModal(lightList, options = {}) {
             ipcRenderer.send('set-light-ids', checked);
             info(`✅ Selected Light IDs: ${idsStr}`);
 
-            // Persist selection to config.json (best effort)
+            // Persist selection to config.json
             try {
                 const cfg = fs.existsSync(getConfigPath())
                     ? JSON.parse(fs.readFileSync(getConfigPath(), 'utf-8'))
@@ -423,11 +414,12 @@ function showLightSelectionModal(lightList, options = {}) {
 
     // Finally show the modal (ensure selection UI is visible)
     content.querySelectorAll('.tab-btn, .tab-pane').forEach(el => el.style.display = '');
-    legacyList.style.display = 'none'; // keep legacy list hidden
+    // keep legacy list hidden
+    legacyList.style.display = 'none';
     modal.style.display = 'flex';
 }
 
-// Toggle Sichtbarkeit anhand des Provider-Dropdowns (#provider)
+// Toggle visibility using the provider dropdown (#provider)
 function applyProviderVisibility() {
     const providerEl = document.getElementById('provider');
     const provider = (providerEl?.value || 'hue').toLowerCase();
@@ -435,7 +427,6 @@ function applyProviderVisibility() {
     const isHue = provider === 'hue';
     const isYeelight = provider === 'yeelight';
 
-    // kleine Helfer
     const toggle = (el, show) => { if (el) el.style.display = show ? '' : 'none'; };
     const toggleField = (inputId, show) => {
         const input = document.getElementById(inputId);
@@ -498,8 +489,8 @@ function initializeApp() {
 
             // Set light IDs from config
             lightIDs = config.LIGHT_ID.split(',').map(id => id.trim());
-            lightIDsReady = true;  // Mark lightIDs as ready
-            ipcRenderer.send('set-light-ids', lightIDs); // Send the light IDs to renderer
+            lightIDsReady = true;
+            ipcRenderer.send('set-light-ids', lightIDs);
 
             document.getElementById('bridgeIP').value = config.BRIDGE_IP || '';
             debug('Bridge IP field value:', document.getElementById('bridgeIP').value);
@@ -532,11 +523,6 @@ function initializeApp() {
             setVal('discordUseParty', config.DISCORD_USE_PARTY === true);
             setVal('discordResetOnRound', config.DISCORD_RESET_ON_ROUND === true);
             document.getElementById('discordUpdateRate').value = config.DISCORD_UPDATE_RATE ?? 15;
-
-            const setChecked = (id, val) => {
-                const el = document.getElementById(id);
-                if (el) el.checked = val;
-            };
 
             const ev = config.DISCORD_EVENTS || {};
             document.getElementById('rpcEvt_menu').checked = ev.menu !== false;
@@ -573,7 +559,8 @@ function initializeApp() {
         debugSelect.value = config.DEBUG_MODE.toString();
         setDebugMode(config.DEBUG_MODE);
     } else {
-        setDebugMode(false); // default fallback
+        // default fallback
+        setDebugMode(false);
     }
     debugSelect.addEventListener('change', (e) => {
         const enabled = e.target.value === 'true';
@@ -615,10 +602,46 @@ function initializeApp() {
         fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 4));
         info("✅ Config saved.");
 
-        // 🔁 Reload fields
+        // Reload fields
         reloadSettings();
         info("🔁 Reloaded config fields after saving.");
     });
+
+    // Separate save button for Discord section
+    const saveDiscordBtn = document.getElementById('saveDiscordConfig');
+    if (saveDiscordBtn) {
+        saveDiscordBtn.addEventListener('click', () => {
+            info("💾 Saving Discord configuration...");
+
+            const config = fs.existsSync(getConfigPath())
+                ? JSON.parse(fs.readFileSync(getConfigPath(), 'utf-8'))
+                : {};
+
+            // Update only Discord-related fields
+            config.DISCORD_RPC_ENABLED = document.getElementById('discordRpcToggle')?.value === 'true';
+            config.DISCORD_SHOW_ELAPSED = document.getElementById('discordShowElapsed').value === 'true';
+            config.DISCORD_USE_PARTY = document.getElementById('discordUseParty').value === 'true';
+            config.DISCORD_RESET_ON_ROUND = document.getElementById('discordResetOnRound').value === 'true';
+            config.DISCORD_UPDATE_RATE = parseInt(document.getElementById('discordUpdateRate').value) || 15;
+
+            config.DISCORD_EVENTS = {
+                menu: document.getElementById('rpcEvt_menu').checked,
+                roundStart: document.getElementById('rpcEvt_roundStart').checked,
+                bombPlanted: document.getElementById('rpcEvt_bombPlanted').checked,
+                bombDefused: document.getElementById('rpcEvt_bombDefused').checked,
+                bombExploded: document.getElementById('rpcEvt_bombExploded')?.checked ?? true,
+                roundWon: document.getElementById('rpcEvt_roundWon').checked,
+                roundLost: document.getElementById('rpcEvt_roundLost').checked
+            };
+
+            // Write full config back to disk
+            fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 4));
+            info("✅ Discord config saved.");
+
+            // Refresh UI to reflect changes
+            reloadSettings();
+        });
+    }
 
     document.getElementById('startScript').addEventListener('click', async () => {
         if (!lightIDsReady) {
@@ -682,9 +705,9 @@ function initializeApp() {
         setScriptControlsEnabled(false);
         info("🛑 Stopping script...");
 
-        await stopScript(getHueAPI());
-
         ipcRenderer.send('rpc-toggle', false);
+        
+        await stopScript(getHueAPI());
 
         scriptIsRunning = false;
         scriptIsStopping = false;
@@ -733,33 +756,33 @@ function initializeApp() {
     document.getElementById('restartScript').addEventListener('click', async () => {
         if (isTestingColor) { warn("🚫 Cannot restart script while color test is active."); return; }
         if (scriptIsStarting || scriptIsStopping) { warn("⚠️ Script is busy. Please wait..."); return; }
-      
+
         setScriptControlsEnabled(false);
         info("🔁 Restarting Script...");
-      
+
         const wantRpc = document.getElementById('discordRpcToggle')?.value === 'true';
         if (wantRpc) ipcRenderer.send('rpc-toggle', false);
-      
+
         scriptIsStopping = true;
         await stopScript(getHueAPI());
         scriptIsStopping = false;
         scriptIsRunning = false;
-      
+
         await new Promise(r => setTimeout(r, 200));
-      
+
         scriptIsStarting = true;
         const success = await startScript();
         scriptIsStarting = false;
         scriptIsRunning = !!success;
-      
+
         if (success && wantRpc) {
-          setTimeout(() => ipcRenderer.send('rpc-toggle', true), 150);
+            setTimeout(() => ipcRenderer.send('rpc-toggle', true), 150);
         }
-      
+
         ipcRenderer.send('set-script-running', scriptIsRunning);
         updateLogButtonVisibility();
         setScriptControlsEnabled(true);
-      });      
+    });
 
     document.getElementById('openLogBtn').addEventListener('click', () => {
         const serverHost = document.getElementById('serverHost').value || '127.0.0.1';
@@ -1064,7 +1087,7 @@ function xyToRgb(xy, bri = 254) {
     const [x, y] = xy.map(Number);
     const z = 1.0 - x - y;
 
-    const Y = 1.0; // always max intensity for accurate color
+    const Y = 1.0;
     const X = (Y / y) * x;
     const Z = (Y / y) * z;
 
@@ -1341,7 +1364,6 @@ function loadColors() {
             // Make sure the enabled checkbox works normally
             enabledCheckbox.disabled = false;
 
-            // CSS
             wrapper.classList.add('disabled');
         }
 
@@ -1441,7 +1463,7 @@ function loadColors() {
 
             // === YEELIGHT PATH ===
             if (provider === 'yeelight') {
-                // 1) Snapshot current state (best effort; controller may return minimal info)
+                // Snapshot current state (best effort; controller may return minimal info)
                 previousStateCache = {};
                 for (const id of ids) {
                     try {
@@ -1454,7 +1476,7 @@ function loadColors() {
                     }
                 }
 
-                // 2) Build the desired color/state body from the source function
+                // Build the desired color/state body from the source function
                 const color = await colorSourceFn();
                 const body = { on: true, bri: color.bri ?? 200 };
                 if (color.useCt && typeof color.ct === 'number') {
@@ -1463,7 +1485,7 @@ function loadColors() {
                     body.xy = [color.x, color.y];
                 }
 
-                // 3) Apply via controller IPC
+                // Apply via controller IPC
                 for (const id of ids) {
                     try {
                         await ipcRenderer.invoke('controller-set-state', { id, body });
@@ -1472,7 +1494,7 @@ function loadColors() {
                     }
                 }
 
-                // 4) Update UI/testing state
+                // Update UI/testing state
                 isTestingColor = true;
                 testedColorName = name;
                 testSavedButton.textContent = '⛔ Stop Test';
@@ -1590,7 +1612,7 @@ function loadColors() {
     }
 
     // Add invisible filler blocks to balance layout
-    const columns = 4; // change if your grid uses different column count
+    const columns = 4;
     const remainder = colorKeys.length % columns;
     if (remainder !== 0) {
         const fillers = columns - remainder;
@@ -1627,7 +1649,7 @@ async function restorePreviousLightState() {
             }
         }
     } else {
-        // Hue path (wie zuvor)
+        // Hue path
         ipcRenderer.send('set-light-ids', ids);
         const hueAPI = `http://${config.BRIDGE_IP}/api/${config.API_KEY}`;
         for (const id of ids) {
@@ -1690,7 +1712,7 @@ document.getElementById('saveColors').addEventListener('click', () => {
         }
     });
 
-    // 🧼 Sanitize all color objects
+    // Sanitize all color objects
     for (const name in newColors) {
         sanitizeColorObject(newColors[name]);
     }
@@ -1714,7 +1736,7 @@ function loadBombSettings() {
     const container = document.getElementById('bombStagesGrid');
     container.innerHTML = ''; // Clear grid
 
-    // 🧨 Initial Bomb Settings Card
+    // Initial Bomb Settings Card
     const initialWrapper = document.createElement('div');
     initialWrapper.classList.add('color-item', 'initial-bomb-card');
 
@@ -1920,7 +1942,7 @@ async function setupPaths() {
         debug("🛠️ Dev mode: using local files only, no copying.");
     }
 
-    // ✅ Ensure backups directory exists
+    // Ensure backups directory exists
     const backupDir = getBackupPath();
     if (!fs.existsSync(backupDir)) {
         fs.mkdirSync(backupDir, { recursive: true });
@@ -2022,7 +2044,7 @@ function showMessageModal(message, options = {}) {
         warningBox.textContent = '';
     }
 
-    // Hide *selection* UI while message modal is active
+    // Hide selection UI while message modal is active
     const toHideSelectors = [
         '#lightCheckboxList',
         '#groupedLightsList',
@@ -2123,6 +2145,22 @@ function populateLightsUI(grouped, all) {
     // To keep selections in sync between tabs
     const checkboxRegistry = {};
 
+    // Read previously selected IDs from config.json and normalize to strings
+    let previouslySelected = new Set();
+    try {
+        if (fs.existsSync(getConfigPath())) {
+            const cfg = JSON.parse(fs.readFileSync(getConfigPath(), 'utf-8'));
+            const list = (cfg.LIGHT_ID || '')
+                .split(',')
+                .map(s => s.trim())
+                .filter(Boolean)
+                .map(String);
+            previouslySelected = new Set(list);
+        }
+    } catch (_) {
+        // Fallback to empty set
+    }
+
     function renderCheckbox(light) {
         const { id, name } = light;
 
@@ -2132,6 +2170,9 @@ function populateLightsUI(grouped, all) {
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
         checkbox.value = id;
+
+        // Pre-select if the id is in previouslySelected
+        checkbox.checked = previouslySelected.has(String(id));
 
         if (!checkboxRegistry[id]) checkboxRegistry[id] = [];
         checkboxRegistry[id].push(checkbox);

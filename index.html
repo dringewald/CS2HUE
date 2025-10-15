@@ -123,14 +123,6 @@
       <option value="false">Disabled</option>
     </select>
 
-    <div class="row">
-      <label for="discordRpcToggle" title="Discord Rich Presence anzeigen">Discord RPC</label>
-      <select id="discordRpcToggle" title="Enable or disable Discord Rich Presence integration.">
-        <option value="true">Enabled</option>
-        <option value="false">Disabled</option>
-      </select>
-    </div>
-
     <label>HTML Logfile:</label>
     <select id="htmlLog"
       title="If true, saves the full session log into an HTML file under /logs/. Useful for debugging.">
@@ -168,6 +160,14 @@
   <div class="section" id="discordPresenceSection"
     style="margin-top:12px; border-top:1px solid #333; padding-top:12px;">
     <h3>🎮 Discord Presence</h3>
+
+    <div class="row">
+      <label for="discordRpcToggle" title="Discord Rich Presence anzeigen">Discord RPC</label>
+      <select id="discordRpcToggle" title="Enable or disable Discord Rich Presence integration.">
+        <option value="true">Enabled</option>
+        <option value="false">Disabled</option>
+      </select>
+    </div>
 
     <div class="row">
       <label for="discordShowElapsed" title="Show Discord's elapsed timer (startTimestamp)">Show Elapsed Timer</label>
@@ -294,8 +294,12 @@
         </div>
       </div>
     </div>
+    <!-- Save Button -->
+    <div class="row" style="margin-top:10px; text-align:right;">
+      <button class="oldborder" id="saveDiscordConfig">💾 Save Discord Config</button>
+    </div>
   </div>
-  
+
   <div class="section" id="controlButtons">
     <button id="startScript">▶️ Start Script</button>
     <button id="stopScript">⏹ Stop Script</button>
