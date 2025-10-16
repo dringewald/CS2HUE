@@ -2,6 +2,7 @@ const { ipcMain, powerSaveBlocker, app, BrowserWindow, shell } = require('electr
 const { stopScript, isScriptRunning, setIsRunning, setLightIDs, setHueAPI, getHueAPI } = require('./logic');
 const { info, warn, debug, error, initializeLogger, setIpcBridge } = require('./logger');
 const { setBasePath } = require('./paths');
+const path = require('path');
 const DiscordRPC = require('./discordRPC');
 
 app.commandLine.appendSwitch('no-timers-throttle');
@@ -10,54 +11,58 @@ let isTestingColor = false;
 let cleanupDone = false;
 let currentHueAPI = null;
 let blockerId;
+let resetLightsDone = false;
+let lightIDs = [];
 
-ipcMain.on('color-test-status', (status) => {
+ipcMain.on('color-test-status', (_e, status) => {
     isTestingColor = status;
 });
 
-ipcMain.on('set-light-ids', (ids) => {
+ipcMain.on('set-light-ids', (_e, ids) => {
     lightIDs = ids;
     setLightIDs(ids);
 });
 
-ipcMain.on('set-script-running', (status) => {
+ipcMain.on('set-script-running', (_e, status) => {
     setIsRunning(status);
 });
 
-ipcMain.handle('get-user-data-path', () => {
+ipcMain.handle('get-user-data-path', (_e) => {
     return app.getPath('userData');
 });
-ipcMain.handle('get-is-packaged', () => {
+ipcMain.handle('get-is-packaged', (_e) => {
     return app.isPackaged;
 });
 
-ipcMain.handle('open-folder', async (folderPath) => {
+ipcMain.handle('open-folder', async (_e, folderPath) => {
     try {
+        if (!folderPath || typeof folderPath !== 'string') return false;
+        if (!path.isAbsolute(folderPath)) return false;
         await shell.openPath(folderPath);
         return true;
     } catch (err) {
-        error("Failed to open folder:", err?.stack || err?.message || String(err));
+        error("❌ Failed to open folder:", err?.stack || err?.message || String(err));
         return false;
     }
 });
 
-ipcMain.on('lights-reset-complete', () => {
+ipcMain.on('lights-reset-complete', (_e) => {
     resetLightsDone = true;
 });
 
-ipcMain.on('set-hue-api', (api) => {
+ipcMain.on('set-hue-api', (_e, api) => {
     currentHueAPI = api;
     setHueAPI(api);
 });
 
-ipcMain.on('stop-script', async () => {
+ipcMain.on('stop-script', async (_e) => {
     if (!getHueAPI() && currentHueAPI) {
         setHueAPI(currentHueAPI);
     }
     await stopScript();
 });
 
-ipcMain.handle('controller-get-state', async ({ id }) => {
+ipcMain.handle('controller-get-state', async (_e, { id }) => {
     const logic = require('./logic');
     if (typeof logic.getLightData === 'function') {
         return await logic.getLightData(id);
@@ -65,7 +70,7 @@ ipcMain.handle('controller-get-state', async ({ id }) => {
     return {};
 });
 
-ipcMain.handle('controller-set-state', async ({ id, body }) => {
+ipcMain.handle('controller-set-state', async (_e, { id, body }) => {
     const logic = require('./logic');
     if (typeof logic.updateLightData === 'function') {
         return await logic.updateLightData(id, body);
@@ -79,7 +84,7 @@ ipcMain.on('rpc-toggle', (_e, enabled) => {
     else DiscordRPC.stopRPC();
 });
 
-ipcMain.on('rpc-bump', () => DiscordRPC.discordBump());
+ipcMain.on('rpc-bump', (_e) => DiscordRPC.discordBump());
 
 ipcMain.on('rpc-update', (_e, partial) => {
     try { DiscordRPC.updatePresence(partial || {}); } catch { }

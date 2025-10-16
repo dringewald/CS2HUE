@@ -90,6 +90,13 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
 });
 
+function isSafeHttpUrl(u) {
+    try {
+        const url = new URL(u);
+        return url.protocol === 'http:' || url.protocol === 'https:';
+    } catch { return false; }
+}
+
 function sanitizeColorObject(obj) {
     for (const key in obj) {
         if (obj[key] === null || key === 'undefined') {
@@ -488,7 +495,10 @@ function initializeApp() {
             }
 
             // Set light IDs from config
-            lightIDs = config.LIGHT_ID.split(',').map(id => id.trim());
+            lightIDs = (config.LIGHT_ID || '')
+                .split(',')
+                .map(id => id.trim())
+                .filter(Boolean);
             lightIDsReady = true;
             ipcRenderer.send('set-light-ids', lightIDs);
 
@@ -671,7 +681,7 @@ function initializeApp() {
         const success = await startScript();
 
         if (document.getElementById('discordRpcToggle')?.value === 'true') {
-            ipcRenderer.send('rpc-toggle', true);
+            setTimeout(() => ipcRenderer.send('rpc-toggle', true), 1000);
         }
 
         scriptIsStarting = false;
@@ -706,7 +716,7 @@ function initializeApp() {
         info("🛑 Stopping script...");
 
         ipcRenderer.send('rpc-toggle', false);
-        
+
         await stopScript(getHueAPI());
 
         scriptIsRunning = false;
@@ -768,7 +778,8 @@ function initializeApp() {
         scriptIsStopping = false;
         scriptIsRunning = false;
 
-        await new Promise(r => setTimeout(r, 200));
+        // Let HTTP server + RPC teardown fully finish
+        await new Promise(r => setTimeout(r, 600));
 
         scriptIsStarting = true;
         const success = await startScript();
@@ -776,7 +787,8 @@ function initializeApp() {
         scriptIsRunning = !!success;
 
         if (success && wantRpc) {
-            setTimeout(() => ipcRenderer.send('rpc-toggle', true), 150);
+            // Start RPC after its internal cooldown (>800ms) to avoid "connection closed"
+            setTimeout(() => ipcRenderer.send('rpc-toggle', true), 1200);
         }
 
         ipcRenderer.send('set-script-running', scriptIsRunning);
@@ -788,14 +800,18 @@ function initializeApp() {
         const serverHost = document.getElementById('serverHost').value || '127.0.0.1';
         const serverPort = document.getElementById('serverPort').value || '8080';
         const url = `http://${serverHost}:${serverPort}/log`;
-        require('electron').shell.openExternal(url);
+        if (isSafeHttpUrl(url)) {
+            require('electron').shell.openExternal(url);
+        }
     });
 
     document.getElementById('openDocBtn').addEventListener('click', () => {
         const serverHost = document.getElementById('serverHost').value || '127.0.0.1';
         const serverPort = document.getElementById('serverPort').value || '8080';
         const url = `http://${serverHost}:${serverPort}/docs/index.html`;
-        require('electron').shell.openExternal(url);
+        if (isSafeHttpUrl(url)) {
+            require('electron').shell.openExternal(url);
+        }
     });
 
     document.getElementById('openConfig').addEventListener('click', () => {
@@ -1869,7 +1885,10 @@ function reloadSettings() {
     const savedConfig = JSON.parse(fs.readFileSync(getConfigPath(), 'utf-8'));
 
     // Set light IDs from config
-    lightIDs = savedConfig.LIGHT_ID.split(',').map(id => id.trim());
+    lightIDs = (savedConfig.LIGHT_ID || '')
+        .split(',')
+        .map(id => id.trim())
+        .filter(Boolean);
     lightIDsReady = true;
     ipcRenderer.send('set-light-ids', lightIDs);
 

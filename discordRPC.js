@@ -7,8 +7,8 @@ let sessionStart = null;
 let starting = false;
 let reconnectTimer = null;
 let cooldownUntil = 0;
+let shuttingDown = false;
 
-// helper
 function clearReconnectTimer() {
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
 }
@@ -40,6 +40,11 @@ function clearKeepAlive() {
 
 async function startRPC() {
   if (connected || starting) return;
+  if (shuttingDown) {
+    clearReconnectTimer();
+    reconnectTimer = setTimeout(startRPC, 800);
+    return;
+  }
   if (!clientId) {
     warn("⚠️ [Discord] - [RPC] clientId missing – Presence will not start.");
     return;
@@ -87,8 +92,13 @@ async function startRPC() {
     await rpc.login({ clientId });
   } catch (err) {
     starting = false;
-    error("❌ [Discord] - [RPC] Login failed:", err?.message || err);
-    const backoff = Math.min(20000, (rpc?._retries || 0) * 1500 + 1500);
+    const msg = err?.message || String(err || '');
+    // During restart/teardown these are expected; keep logs clean
+    if (shuttingDown && /connection closed|RPC_CONNECTION_TIMEOUT/i.test(msg)) {
+      debug?.(`[Discord] suppressed login error during shutdown: ${msg}`);
+    } else {
+      error("❌ [Discord] - [RPC] Login failed:", msg);
+    } const backoff = Math.min(20000, (rpc?._retries || 0) * 1500 + 1500);
     rpc && (rpc._retries = (rpc._retries || 0) + 1);
     cooldownUntil = Date.now() + Math.max(1000, backoff);
     clearReconnectTimer();
@@ -150,7 +160,9 @@ function updatePresence(partial = {}) {
 function stopRPC() {
   clearKeepAlive();
   clearReconnectTimer();
-  cooldownUntil = Date.now() + 800; // kleine Atempause vor neuem Login
+  cooldownUntil = Date.now() + 800;
+  shuttingDown = true;
+  setTimeout(() => { shuttingDown = false; }, 1500);
   if (!rpc && !connected && !starting) {
     info("📞 [Discord] - [RPC] Presence terminated");
     return;
@@ -168,7 +180,7 @@ function stopRPC() {
 
 function discordBump() {
   if (connected) {
-    if (lastActivity) { try { rpc.setActivity(lastActivity); } catch {} }
+    if (lastActivity) { try { rpc.setActivity(lastActivity); } catch { } }
     else { setActivity(FIXED_ACTIVITY); }
   } else {
     startRPC();

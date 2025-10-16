@@ -752,7 +752,7 @@ async function bombDefused() {
         isBlinking = false;
     }
 
-    info("🛡 Bomb has been defused");
+    info("🧯 Bomb has been defused");
 
     if (colors.defused) {
         await sendColorToAllLights(colors.defused, { force: true, verify: true, retries: 2 });
@@ -767,7 +767,6 @@ async function bombDefused() {
     delayWinLossColor = true;
     setTimeout(() => delayWinLossColor = false, 2000);
 
-    // Failover Round End
     // Failover Round End
     setTimeout(async () => {
         if (roundEnded) return;
@@ -800,8 +799,8 @@ async function bombDefused() {
         // If no result has been applied by now, force apply one
         if (!roundEnded) {
             const winner = gameState?.round?.win_team || 'CT';
-            info(`🧯 Watchdog: forcing round result after explosion (${winner})`);
-            applyRoundResultByWinner(winner, 'explode-watchdog')
+            info(`🧯 Watchdog: forcing round result after defuse (${winner})`);
+            applyRoundResultByWinner(winner, 'defuse-watchdog')
                 .catch(e => error(`❌ Watchdog apply failed: ${e.message}`));
         } else {
             resumeRoundIfStuck('post-result');
@@ -995,6 +994,8 @@ async function startScript() {
         info("🟡 Yeelight mode: skipping Hue bridge checks.");
     }
 
+    suppressDefaultColor = true;
+
     const host = config.SERVER_HOST || '127.0.0.1';
     const port = config.SERVER_PORT || 8080;
 
@@ -1154,12 +1155,12 @@ async function startScript() {
         }
     });
 
-    server.listen(port, host, () => {
-        info(`🟢 Server listening on http://${host}:${port}`);
+    await new Promise(resolve => {
+        server.listen(port, host, () => {
+            info(`🟢 Server listening on http://${host}:${port}`);
+            resolve();
+        });
     });
-
-    // Lights could be off, so mute health check for a second
-    muteHealthcheck(4000, 'startup');
 
     // Save previous state
     try {
@@ -1168,18 +1169,34 @@ async function startScript() {
         lightIDs.forEach((id, i) => {
             stateToSave[id] = states[i];
         });
-
         fs.writeFileSync(getPreviousStatePath(), JSON.stringify(stateToSave, null, 4));
         info("📦 Saved previous light states");
     } catch (err) {
         error(`❌ Failed to get or save light state: ${err.message}`);
     }
 
+    // Prep first install
+    isFirstPoll = true;
+    lastGamestateMTime = 0;
+    keepPollingUntilTs = Date.now() + 6000;
+
+    // Fist poll
+    try {
+        await handlePoll();
+    }
+    catch (_) {
+        /* ignore */
+    }
+
+    // Lights could be off, so mute health check for a second
+    muteHealthcheck(4000, 'startup');
+
     // Start polling
     pollerActive = true;
     pollLoop();
 
     // Set fallback color if no team color was set
+    suppressDefaultColor = false;
     setTimeout(() => {
         if (!lastColorMode && !isBombPlanted && !isFading && !isBlinking) {
             setDefaultColor();
@@ -1207,10 +1224,12 @@ async function pollLoop() {
         // Otherwise we can safely skip when the file hasn't changed.
         if (
             !changed &&
+            !isFirstPoll &&
             !isBombPlanted &&
             !isBlinking &&
             !roundEnded &&
-            !suppressColorUntilNextRound && Date.now() > keepPollingUntilTs
+            !suppressColorUntilNextRound &&
+            Date.now() > keepPollingUntilTs
         ) {
             shouldPoll = false;
         } else {
@@ -1322,7 +1341,7 @@ async function handlePoll() {
                 warn("⚠️ Menu color is disabled or not defined in colors.json");
             }
             // Discord RPC Text
-            if (config?.DISCORD_EVENTS?.menu !== false) sendRpc('Menu');
+            if (config?.DISCORD_EVENTS?.menu !== false) sendRpc({ label: '📋 In menu' });
         }
 
         return;
@@ -1342,7 +1361,7 @@ async function handlePoll() {
                 warn("⚠️ Warmup color is disabled or not defined in colors.json");
             }
             // Discord RPC Text
-            if (config?.DISCORD_EVENTS?.roundStart !== false) sendRpc('Warmup', { resetTimer: true });
+            if (config?.DISCORD_EVENTS?.roundStart !== false) sendRpc({ label: '🔥 In Warmup', resetTimer: true });
         }
         return;
     }
@@ -1362,7 +1381,7 @@ async function handlePoll() {
             await bombPlanted();
             info("💣 Bomb has been planted");
             // Discord Text
-            if (config?.DISCORD_EVENTS?.bombPlanted !== false) sendRpc('Planted');
+            if (config?.DISCORD_EVENTS?.bombPlanted !== false) sendRpc({ label: '💣 Bomb planted' });
         }
 
         if (gameState.round.bomb === "exploded" && !isBombExploded && !explodedHandled) {
@@ -1376,7 +1395,7 @@ async function handlePoll() {
                 error(`❌ Error in bombExploded(): ${err.message}`);
             }
             // Discord Text
-            if (config?.DISCORD_EVENTS?.bombExploded !== false) sendRpc('Exploded');
+            if (config?.DISCORD_EVENTS?.bombExploded !== false) sendRpc({ label: '💥 Bomb exploded' });
         }
 
         if (gameState.round.bomb === "defused" && !isBombDefused && !defusedHandled) {
@@ -1390,7 +1409,7 @@ async function handlePoll() {
                 error(`❌ Error in bombDefused(): ${err.message}`);
             }
             // Discord Text
-            if (config?.DISCORD_EVENTS?.bombDefused !== false) sendRpc('Defused');
+            if (config?.DISCORD_EVENTS?.bombDefused !== false) sendRpc({ label: '🧯 Bomb defused' });
         }
     }
 
@@ -1421,7 +1440,8 @@ async function handlePoll() {
                 lastColorMode = 'default';
             }
             // Discord Text
-            if (config?.DISCORD_EVENTS?.roundStart !== false) sendRpc('RoundStart', { resetTimer: !!config.DISCORD_RESET_ON_ROUND });
+            if (config?.DISCORD_EVENTS?.roundStart !== false)
+                sendRpc({ label: '⏱️ Round start', resetTimer: !!config.DISCORD_RESET_ON_ROUND });
         }
     }
 
@@ -1507,7 +1527,7 @@ async function handlePoll() {
                     isBlinking = false;
                 }
                 // Discord Text
-                if (config?.DISCORD_EVENTS?.roundWon !== false) sendRpc('RoundWon');
+                if (config?.DISCORD_EVENTS?.roundWon !== false) sendRpc({ label: '🏆 Round won!' });;
             }
         } else {
             info("💀 Round lost.");
@@ -1535,7 +1555,7 @@ async function handlePoll() {
                     isBlinking = false;
                 }
                 // Discord Text
-                if (config?.DISCORD_EVENTS?.roundLost !== false) sendRpc('RoundLost');
+                if (config?.DISCORD_EVENTS?.roundLost !== false) sendRpc({ label: '💀 Round lost.' });;
             }
         }
     }
@@ -1565,7 +1585,8 @@ async function handlePoll() {
                 lastColorMode = 'default';
             }
             // Discord Text
-            if (config?.DISCORD_EVENTS?.roundStart !== false) sendRpc('RoundStart', { resetTimer: !!config.DISCORD_RESET_ON_ROUND });
+            if (config?.DISCORD_EVENTS?.roundStart !== false)
+                sendRpc({ label: '⏱️ Round start', resetTimer: !!config.DISCORD_RESET_ON_ROUND });
         }
     }
     if (!isFading && !isBlinking && !isBombPlanted && !suppressColorUntilNextRound &&
@@ -1736,6 +1757,9 @@ function resetInternalFlags() {
     bombCountdown = null;
     lastHealthCheck = Date.now();
     blinkEffect = [];
+    isFirstPoll = true;
+    lastGamestateMTime = 0;
+    keepPollingUntilTs = 0;
     clearSessionLog();
 }
 
@@ -1915,29 +1939,43 @@ function computeParty(gs) {
 }
 
 let lastRpcSent = 0;
-function sendRpc({ resetTimer = false } = {}) {
-    try {
-        if (!config?.DISCORD_RPC_ENABLED) return;
+function sendRpc(arg = {}) {
+    let label, resetTimer = false;
+    if (typeof arg === 'string') label = arg;
+    else if (arg && typeof arg === 'object') ({ label, resetTimer = false } = arg);
 
-        if (!resetTimer && Date.now() - lastRpcSent < 900) return;
+    if (!config?.DISCORD_RPC_ENABLED) return;
+    if (!resetTimer && Date.now() - lastRpcSent < 900) return;
 
-        const ipc = getIpc();
-        if (!ipc) return;
+    const ipc = getIpc();
+    if (!ipc) return;
 
-        const lines = buildFixedLines(gameState);
-        const partial = {
-            details: lines.details,
-            state: lines.state,
-            showElapsed: config.DISCORD_SHOW_ELAPSED === true, // <- wichtig
-            resetTimer: !!resetTimer
-        };
+    const lines = buildFixedLines(gameState);
+    let { details, state } = lines;
 
-        const party = config.DISCORD_USE_PARTY ? computeParty(gameState) : null;
-        if (party) partial.partySize = party;
+    const showElapsed = config.DISCORD_SHOW_ELAPSED === true;
 
-        ipc.send('rpc-update', partial);
-        lastRpcSent = Date.now();
-    } catch (_) { }
+    if (label) {
+        state = state ? `${state} — ${label}` : label;
+    }
+
+    const partial = {
+        details,
+        state,
+        showElapsed,
+        resetTimer,
+    };
+
+    // Optional: Party info
+    const party = config.DISCORD_USE_PARTY ? computeParty(gameState) : null;
+    if (party) partial.partySize = party;
+
+    if (label) {
+        partial.smallImageText = label;
+    }
+
+    ipc.send("rpc-update", partial);
+    lastRpcSent = Date.now();
 }
 
 // --- Runtime reload of config + colors (no full restart required) ---
